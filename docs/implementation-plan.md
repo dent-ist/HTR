@@ -9,7 +9,7 @@ Status: **draft v2 for review** (incorporates review decisions on training trigg
 ## 1. Goals and non-goals
 
 ### Goals
-- Import a few hundred scanned note pages (images, 300 DPI, clean).
+- Import a few hundred scanned note pages (clear images, mostly ~300 DPI).
 - Segment each page into text lines automatically, and make repairing segmentation mistakes fast.
 - Let the user transcribe lines in a browser UI.
 - Fine-tune a recognition model on the user's corrections and predict the remaining lines.
@@ -29,7 +29,7 @@ Status: **draft v2 for review** (incorporates review decisions on training trigg
 ### Assumptions
 - Single writer, English, horizontal text, upright pages (arbitrary small skew is possible).
 - Lined or unlined paper; notes in no fixed order.
-- Pages are clean 300 DPI scans.
+- Pages are clear scans, mostly ~300 DPI but not guaranteed. The pipeline does not trust DPI metadata; it normalizes by measured text-line height (5.1).
 - A few hundred pages; fine-tuning, not training from scratch.
 - Sensitive content (some pages are medical notes), so all processing is local.
 
@@ -128,6 +128,10 @@ PAGE-XML on disk is kept in sync with the DB; PAGE-XML is the export/import form
 - Accept PNG/JPG/TIFF. Store originals untouched; derive a working copy.
 - Convert to grayscale/normalize contrast. Optional binarization for segmentation only.
 - Light deskew (small angles only). No orientation detection.
+- **Do not rely on DPI.** The DPI tag in a file is often missing or wrong. On import, record each image's pixel dimensions, any DPI metadata, and an **estimated typical text-line height in pixels**, since that is what the models care about.
+- **Normalize by line height.** Kraken rescales line crops to a fixed height for recognition; the importer additionally rescales working copies of images that are far outside the usable range (very large or very small scans) toward a target line height. Originals are never modified.
+- **Flag outliers.** An import report lists images with low resolution (roughly below 150 DPI-equivalent, or a line height too small to resolve thin strokes), unusual sizes, or missing/contradictory metadata, so the user can rescan or accept lower accuracy on them.
+- **Image inspection script** (`scripts/inspect_images.py`): given a folder, prints size, DPI tag, estimated line height and any warnings for every image, and a summary. Run before segmentation to characterize the whole set in seconds.
 
 ### 5.2 Segmentation
 - Kraken baseline segmentation (`blla`) produces baselines and polygons per line.
@@ -214,10 +218,11 @@ Each milestone ends in something runnable and reviewable.
 **M0: Skeleton and environment**
 - Repo layout, `pyproject.toml`, `Makefile`, `.gitignore` (excluding `data/`).
 - `check_env.py`; confirm CUDA works under WSL2 and Kraken runs.
+- `inspect_images.py`: image size / DPI tag / estimated line height report for a folder of scans.
 - *Done when:* `make check` passes on the user's machine.
 
 **M1: Import and segmentation (CLI), go/no-go**
-- Import images into `data/`, run Kraken segmentation, write PAGE-XML, render an overlay PNG for inspection.
+- Run `inspect_images.py` on the full image set and decide on the line-height normalization target. Import images into `data/`, normalize, run Kraken segmentation, write PAGE-XML, render an overlay PNG for inspection.
 - Run on ~20 representative pages (including messy ones) and compute the share of correctly segmented lines with the user.
 - *Done when:* we have a segmentation result against the thresholds in 5.2 (> 90% / 70-90% / < 70%) and have chosen the follow-up: proceed, prioritize repair tools, or tune the segmenter.
 
@@ -252,6 +257,7 @@ Each milestone ends in something runnable and reviewable.
 |---|---|
 | Segmentation is poor on messy notes (overlaps, margins, slant) | Hybrid strategy (5.2): validate in M1 against explicit thresholds; fast manual repair tools in the UI; fine-tune the segmenter on corrected pages only if errors are systematic. |
 | Fine-tuning on a few hundred pages is not accurate enough | Measure CER early (M4); try TrOCR via the `Recognizer` interface; add augmentation; label more lines. |
+| Scan resolution varies (DPI tags unreliable) | Measure pixel size and text-line height instead of trusting DPI; normalize working copies; flag low-resolution outliers in an import report (5.1). |
 | Kraken/PyTorch/CUDA setup is fragile under WSL2 | M0 exists to prove this first; pin versions; document the exact setup. |
 | Heavy abbreviation use hurts recognition | Keep diplomatic transcription so the model learns the abbreviation shapes directly; expand afterward. |
 | Labeling effort is too high | Active learning ordering; prediction acceptance with one key; train after small batches. |
@@ -275,4 +281,5 @@ Each milestone ends in something runnable and reviewable.
 3. **Crossed-out text**: ignored.
 4. **Full-text search**: out of scope for v1.
 5. **Backups**: export/import project bundle so work can be resumed (5.7).
+7. **Resolution**: scans are mostly ~300 DPI but not guaranteed; the pipeline measures text-line height and normalizes instead of trusting DPI metadata (5.1).
 6. **Segmentation approach**: hybrid; automatic segmentation, validated in M1 against explicit thresholds, with fast manual repair tools in the UI and segmenter fine-tuning only if errors are systematic (5.2).
