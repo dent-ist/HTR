@@ -2,7 +2,7 @@
 
 A local-first handwritten text recognition (HTR) tool for one writer's scanned notes. The user transcribes a small number of lines, the system learns that writer's hand, and it predicts the rest. Nothing leaves the machine.
 
-Status: **draft for review**
+Status: **draft v2 for review** (incorporates review decisions on training triggers, crossed-out text, search, export bundle, and segmentation strategy)
 
 ---
 
@@ -10,7 +10,7 @@ Status: **draft for review**
 
 ### Goals
 - Import a few hundred scanned note pages (images, 300 DPI, clean).
-- Segment each page into text lines automatically.
+- Segment each page into text lines automatically, and make repairing segmentation mistakes fast.
 - Let the user transcribe lines in a browser UI.
 - Fine-tune a recognition model on the user's corrections and predict the remaining lines.
 - Prioritize review of low-confidence predictions (active learning).
@@ -135,6 +135,18 @@ PAGE-XML on disk is kept in sync with the DB; PAGE-XML is the export/import form
 - Known weak spots to surface in the UI: margin notes, arrows, doodles, crossed-out text. Users can mark lines as ignored or edit/redraw baselines.
 - **Crossed-out text is ignored**: the user marks those lines (or regions) as ignored and they are excluded from training and prediction.
 
+**Segmentation quality** means how accurately text lines are detected and outlined. The recognizer only sees the line images the segmenter produces, so a merged, split, clipped or missed line fails regardless of how well the recognizer is trained.
+
+**Strategy: automatic segmentation plus cheap manual repair (hybrid).** Perfect automatic segmentation on freeform handwritten notes is not realistic, so the goal is a good default and a fast fix, not a flawless detector.
+
+1. **Validate first (M1).** Run Kraken on ~20 representative pages, including the messiest ones, and review overlays. Measure the share of correctly segmented lines. Decision guide:
+   - **> 90% correct:** proceed as planned.
+   - **70-90%:** proceed, but build the repair tools early and treat them as a top UI priority.
+   - **< 70%:** before going further, try alternative segmenter settings, and then fine-tune the segmenter on a few corrected pages.
+2. **Fast repair tools in the UI.** Delete/ignore a line, merge two lines, split a line, and redraw a baseline by clicking a few points. Fixing a line should take about two seconds.
+3. **Segmenter fine-tuning only if needed.** If M1 shows consistent systematic errors (e.g. clipped descenders), fine-tune Kraken's segmentation model on corrected pages. The repaired pages double as training data, so this costs little extra.
+4. **Don't over-invest.** Segmentation errors are visible but cheap to fix by hand; recognition accuracy determines the total typing effort. Spend limited effort on segmentation and move quickly to the labeling and training loop.
+
 ### 5.3 Recognition
 - Start from a pretrained Kraken English/Latin handwriting model if one is usable; otherwise start from the general model and fine-tune.
 - Output per-line text and a confidence score.
@@ -173,7 +185,7 @@ PAGE-XML on disk is kept in sync with the DB; PAGE-XML is the export/import form
    - Text input for the current line, with the line crop shown above it.
    - Keyboard-first: Enter = save and next line, Tab/Shift-Tab to move, shortcut to ignore a line.
    - Show predictions with a confidence indicator; accepting a prediction is one keystroke.
-   - Tools: edit baseline, split/merge lines, reorder, mark region ignored.
+   - Segmentation repair tools: delete/ignore a line, merge, split, redraw baseline (click a few points), reorder, mark region ignored. Built in M3 and prioritized according to the M1 result.
 3. **Review queue**: lowest-confidence lines across all pages, one at a time.
 4. **Training**: start a fine-tune job, see progress, and compare models by CER.
 5. **Abbreviations**: view/edit the dictionary; see occurrences.
@@ -204,10 +216,10 @@ Each milestone ends in something runnable and reviewable.
 - `check_env.py`; confirm CUDA works under WSL2 and Kraken runs.
 - *Done when:* `make check` passes on the user's machine.
 
-**M1: Import and segmentation (CLI)**
+**M1: Import and segmentation (CLI), go/no-go**
 - Import images into `data/`, run Kraken segmentation, write PAGE-XML, render an overlay PNG for inspection.
-- Run on ~20 sample pages and review segmentation quality with the user.
-- *Done when:* the user agrees line detection is good enough on their handwriting, or we know which fixes are needed.
+- Run on ~20 representative pages (including messy ones) and compute the share of correctly segmented lines with the user.
+- *Done when:* we have a segmentation result against the thresholds in 5.2 (> 90% / 70-90% / < 70%) and have chosen the follow-up: proceed, prioritize repair tools, or tune the segmenter.
 
 **M2: Backend API + database**
 - SQLite schema, import/segment endpoints, line CRUD, PAGE-XML sync, job queue.
@@ -238,7 +250,7 @@ Each milestone ends in something runnable and reviewable.
 
 | Risk | Mitigation |
 |---|---|
-| Segmentation is poor on messy notes (overlaps, margins, slant) | Validate in M1 before building UI; provide manual baseline editing; fall back to a different segmenter if needed. |
+| Segmentation is poor on messy notes (overlaps, margins, slant) | Hybrid strategy (5.2): validate in M1 against explicit thresholds; fast manual repair tools in the UI; fine-tune the segmenter on corrected pages only if errors are systematic. |
 | Fine-tuning on a few hundred pages is not accurate enough | Measure CER early (M4); try TrOCR via the `Recognizer` interface; add augmentation; label more lines. |
 | Kraken/PyTorch/CUDA setup is fragile under WSL2 | M0 exists to prove this first; pin versions; document the exact setup. |
 | Heavy abbreviation use hurts recognition | Keep diplomatic transcription so the model learns the abbreviation shapes directly; expand afterward. |
@@ -252,7 +264,7 @@ Each milestone ends in something runnable and reviewable.
 - **CER** (character error rate) on a fixed held-out set of ground-truth lines, reported per model.
 - **WER** as a secondary metric.
 - **Correction effort**: average edits per line over successive rounds (does review get faster?).
-- Segmentation quality (how well text lines are found and outlined) is judged by eye on overlays in M1 and by the share of lines the user must fix in the editor.
+- **Segmentation quality**: share of correctly segmented lines on the M1 sample (thresholds in 5.2), judged by eye on overlays, and afterwards by the share of lines the user must repair in the editor.
 
 ---
 
@@ -263,3 +275,4 @@ Each milestone ends in something runnable and reviewable.
 3. **Crossed-out text**: ignored.
 4. **Full-text search**: out of scope for v1.
 5. **Backups**: export/import project bundle so work can be resumed (5.7).
+6. **Segmentation approach**: hybrid; automatic segmentation, validated in M1 against explicit thresholds, with fast manual repair tools in the UI and segmenter fine-tuning only if errors are systematic (5.2).
