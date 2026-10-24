@@ -24,6 +24,7 @@ Status: **draft for review**
 - Non-English languages.
 - Table, form or diagram understanding.
 - Mobile or desktop-native app.
+- Full-text search across pages (deferred past v1).
 
 ### Assumptions
 - Single writer, English, horizontal text, upright pages (arbitrary small skew is possible).
@@ -132,6 +133,7 @@ PAGE-XML on disk is kept in sync with the DB; PAGE-XML is the export/import form
 - Kraken baseline segmentation (`blla`) produces baselines and polygons per line.
 - Reading order: top-to-bottom by default; user can reorder or ignore lines in the UI.
 - Known weak spots to surface in the UI: margin notes, arrows, doodles, crossed-out text. Users can mark lines as ignored or edit/redraw baselines.
+- **Crossed-out text is ignored**: the user marks those lines (or regions) as ignored and they are excluded from training and prediction.
 
 ### 5.3 Recognition
 - Start from a pretrained Kraken English/Latin handwriting model if one is usable; otherwise start from the general model and fine-tune.
@@ -142,6 +144,7 @@ PAGE-XML on disk is kept in sync with the DB; PAGE-XML is the export/import form
 - Hold out ~10-15% of ground-truth lines for evaluation; fixed split so CER is comparable across rounds.
 - Augmentation: mild rotation, scale, brightness, blur.
 - Each round records the model, training size and CER so progress is visible.
+- Training and prediction are **user-triggered at any time**. The UI shows a recommended minimum (default ~100 ground-truth lines for the first round, then ~50 new lines per retrain) and warns when below it, but never blocks.
 
 ### 5.5 Active learning
 - After each round, predict all non-ground-truth lines.
@@ -153,6 +156,12 @@ PAGE-XML on disk is kept in sync with the DB; PAGE-XML is the export/import form
 - Dictionary maps written forms to expansions. UI shows raw and expanded text side by side.
 - Expansion is rule-based (whole-token match, case-aware). Ambiguous tokens (multiple expansions) are flagged for the user.
 - Later (optional): local LLM via Ollama/llama.cpp suggests expansions from context, shown as reviewable suggestions only.
+
+### 5.7 Project bundle (export / import)
+- A single `.htrbundle` file (zip) containing: original images, PAGE-XML, the SQLite data (lines, ground-truth flags, abbreviations, job/model history), trained model files, and a `manifest.json` with schema version and checksums.
+- Import into an empty project restores everything so work resumes exactly where it stopped. Import into a non-empty project is refused (v1) rather than merged.
+- The schema version in the manifest lets later versions migrate older bundles.
+- Bundles contain personal data; they are written only where the user chooses and are never uploaded.
 
 ---
 
@@ -168,7 +177,7 @@ PAGE-XML on disk is kept in sync with the DB; PAGE-XML is the export/import form
 3. **Review queue**: lowest-confidence lines across all pages, one at a time.
 4. **Training**: start a fine-tune job, see progress, and compare models by CER.
 5. **Abbreviations**: view/edit the dictionary; see occurrences.
-6. **Export**: plain text (raw or expanded), PAGE-XML, searchable full-text across all pages.
+6. **Export / import**: plain text (raw or expanded), PAGE-XML, and a full **project bundle** (see 5.7) to back up and resume.
 
 ---
 
@@ -182,7 +191,7 @@ PAGE-XML on disk is kept in sync with the DB; PAGE-XML is the export/import form
 - `GET /review/next`
 - `GET/POST /abbreviations`
 - `GET /export?format=txt|pagexml&expanded=bool`
-- `GET /search?q=`
+- `GET /bundle/export`, `POST /bundle/import`
 
 ---
 
@@ -216,12 +225,12 @@ Each milestone ends in something runnable and reviewable.
 - Confidence-ordered review queue, prediction display in the editor, retrain flow.
 - *Done when:* repeated rounds visibly reduce CER and correction effort.
 
-**M6: Abbreviations and export**
-- Dictionary UI, expansion view, plain-text and PAGE-XML export, full-text search.
-- *Done when:* a full document exports as readable expanded text.
+**M6: Abbreviations, export and bundle**
+- Dictionary UI, expansion view, plain-text and PAGE-XML export, project bundle export/import.
+- *Done when:* a full document exports as readable expanded text, and a bundle exported from one project imports into a fresh one with all work intact.
 
 **M7: Hardening**
-- Backups, error handling, a small test suite, docs for setup on WSL2, optional local-LLM suggestions.
+- Error handling, a small test suite, docs for setup on WSL2, optional local-LLM suggestions.
 
 ---
 
@@ -243,14 +252,14 @@ Each milestone ends in something runnable and reviewable.
 - **CER** (character error rate) on a fixed held-out set of ground-truth lines, reported per model.
 - **WER** as a secondary metric.
 - **Correction effort**: average edits per line over successive rounds (does review get faster?).
-- Segmentation quality is judged by eye on overlays in M1 and by the share of lines the user must fix in the editor.
+- Segmentation quality (how well text lines are found and outlined) is judged by eye on overlays in M1 and by the share of lines the user must fix in the editor.
 
 ---
 
-## 11. Open questions for review
+## 11. Decisions from review
 
-1. Is the proposed milestone order acceptable, particularly validating segmentation (M1) before building the UI?
-2. Should the first training round wait for a target number of lines (e.g. 100), or let the user trigger it at any time?
-3. Should "crossed-out" text be transcribed (e.g. wrapped in a marker), or ignored?
-4. Is full-text search across all pages needed in v1, or can it wait?
-5. Backups: is copying the `data/` folder enough, or do you want an export/import bundle?
+1. **Segmentation first (M1)**: validate segmentation quality on ~20 sample pages before building the UI. Segmentation quality means how accurately text lines are detected and outlined, since the recognizer can only be as good as the line images it receives.
+2. **Training/prediction**: user-triggered at any time; a recommended number of lines is shown but not enforced.
+3. **Crossed-out text**: ignored.
+4. **Full-text search**: out of scope for v1.
+5. **Backups**: export/import project bundle so work can be resumed (5.7).
