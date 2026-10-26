@@ -61,6 +61,7 @@ CUDA operation. Keep training batch sizes small enough for 4 GB.
 | `make test-frontend` | Vitest unit and component tests |
 | `make lint-frontend` | ESLint plus strict `tsc` type check |
 | `make test-e2e` | Opt-in Playwright end-to-end test (real backend on a temp data dir, real Kraken, headless Chromium) |
+| `python scripts/htr.py bundle export\|import <file>` | Project bundle from the command line, without the server (see "M6") |
 
 ## M3: labeling UI (frontend)
 
@@ -342,6 +343,132 @@ Training took 35, 70 and 102 s (a whole round 45, 79 and 112 s). What this shows
   machinery works end to end (rounds, queue order, events, statistics, charts). It does **not** show that review effort
   will fall for a real writer; that needs real rounds with your own lines.
 
+## M6: abbreviations, export and project bundle
+
+Recognition and transcription stay **diplomatic**: text is stored exactly as written (`pt c/o SOB`). Abbreviations are a
+separate layer: a personal dictionary that is applied on demand, for the raw / expanded text view and the expanded export.
+Expanded text is never stored.
+
+### Abbreviation dictionary (`#/abbreviations`)
+
+Add, edit and delete entries (written form, expansion, optional notes, "case sensitive"), search them, filter to the
+ambiguous ones and sort by occurrences. The occurrence count is live (tokens in the text of every non-ignored line,
+predicted lines included); click it to list the lines, each linking into the editor on that line
+(`#/pages/<id>?line=<line id>`). "Try the dictionary" previews an expansion. A pair (written form, expansion) is unique;
+**several expansions for one written form make it ambiguous** (badge in the table, `ambiguous` + `candidates` in the API).
+
+**Expansion rules** (implemented in `backend/app/abbreviations.py`, pure and unit-tested in `tests/test_abbreviations.py`):
+
+| Rule | Behaviour |
+|---|---|
+| Tokens | The text is split on whitespace; every run of non-space characters is a token. A token is matched **whole**: an entry is never expanded inside a longer word (`ptosis`, `pt-centered`, `SOBx`, `w/o` do not match `pt`, `SOB`, `w/`). |
+| Punctuation | Candidates are tried longest first: the whole token, then fewer characters with trailing punctuation (`, ; : ! ? ) ] } " ' .`) stripped before leading punctuation (`( [ { " '`). So entries that contain punctuation themselves (`c/o`, `w/`, `s.o.b.`, `b.i.d`) match as written, `SOB.` matches `SOB`, and `b.i.d.` falls back to `b.i.d`. Stripped punctuation stays in the output (`(pt),` becomes `(patient),`). |
+| Case of the match | Case-insensitive, unless the entry is marked case sensitive: then the token must equal the written form exactly. |
+| Case of the output | The token equals the written form: the expansion as stored. A short ALL-CAPS token (2 to 4 letters, no lowercase): the expansion as stored (`SOB` becomes `shortness of breath`). Otherwise a token that starts with an uppercase letter: the expansion with its first character uppercased, the rest untouched (`Pt` becomes `Patient`, `APPROX` becomes `Approximately`). Otherwise the expansion as stored. |
+| Ambiguous | More than one distinct expansion matches a token: it is **not** expanded. It is reported with its candidates (`status: ambiguous`), left as written in text (`ambiguous=raw`, default) or marked `SOB[?]` (`ambiguous=mark`). Two rows with the same expansion are not ambiguous. Case-sensitive rows with different spellings (`US`, `us`) do not conflict. |
+| Single pass | Left to right, once. Expansions are never re-scanned, so an expansion that contains another entry's written form is not expanded again; expanding already expanded text changes nothing unless an expansion is itself an entry. |
+| Spans | Every result carries `start`, `end`, `written`, `expansion` and `status` (`expanded` / `ambiguous` / `unmatched`) per token, offsets into the input. |
+
+**Text view** (`#/pages/<id>/text`, "Text view" button in the editor): the page's lines with the raw text (matches
+highlighted, ambiguous ones in orange) next to the expanded text; options for marking ambiguity and for showing predictions.
+
+### Export (`#/export`, `GET /export`)
+
+- **Plain text**: UTF-8, one block per page (`=== <document> / page <n> (<file>) ===`, `n` = position in the document by import
+  order), lines in reading order, a blank line between pages. Ignored and empty lines are never exported, pages without text
+  are left out. **Predicted lines are excluded by default**; with `include_predicted` they are included and each is prefixed
+  `[predicted] `. `expanded=true` applies the dictionary; `ambiguous=raw|mark` decides what happens to ambiguous tokens.
+- **PAGE-XML**: a zip with one file per segmented page, rendered from the database by the same writer as the project's own
+  files (so text, `ground_truth` / `ignored` / `text_source` flags and confidence are included). Without
+  `include_predicted` the text and confidence of predicted lines are left out.
+- File names are generic (`htr-<document>-expanded.txt`, `htr-all-pagexml.zip`); no path of your machine appears in the
+  file or the header.
+
+### Project bundle (`.htrbundle`)
+
+One zip file with everything needed to continue the work on another machine or after a disaster. **It contains your scans and
+all transcriptions, so it contains personal data**: it is written only where you choose (the browser's save location, or the
+path you give the CLI) and nothing is ever uploaded. Layout (paths mirror the data directory, so the relative paths stored in
+the database stay valid):
+
+```
+manifest.json            written last (it holds the checksums of everything before it)
+db/htr.sqlite            consistent snapshot (sqlite3 backup API, never a copy of the live file)
+originals/...            the untouched scans, byte-identical
+working/...              working copies (what the line coordinates refer to)
+pagexml/...              PAGE-XML, rendered from the snapshot so it matches the database exactly
+models/<id>.mlmodel      fine-tuned models
+models/base/<name>/...   the pretrained base models that model rows point at (model file + BASE_MODEL.json)
+```
+
+Not included: overlays, import reports, `training/` run folders (regenerable), temporary files. The database part carries
+documents, pages, lines (text, flags, geometry, order), `line_splits` and `model_lines`, models and the active flag, jobs
+(history), review events and abbreviations.
+
+```json
+{
+  "format": "htr-bundle",
+  "bundle_format_version": 1,
+  "schema_version": 4,
+  "app_version": "0.3.0",
+  "created_at": "2026-10-26T12:00:00.000000Z",
+  "counts": {"documents": 1, "pages": 10, "lines": 30, "ground_truth_lines": 24, "models": 2, "finetuned_models": 1,
+             "abbreviations": 4, "review_events": 3, "jobs": 12, "files": 33},
+  "missing_files": [],
+  "files": [{"path": "db/htr.sqlite", "size": 151552, "sha256": "..."}, {"path": "originals/page_1658c3e4.png", "size": 344641, "sha256": "..."}],
+  "manifest_sha256": "..."
+}
+```
+
+**Export** (`GET /bundle/export`, **Export project bundle** on the Export page, `python scripts/htr.py bundle export <file>`):
+refused with **409** while a segment, train or predict job is queued or running (the message names the job). Otherwise the
+zip is streamed in chunks (never built in memory); the browser saves the stream straight to a file. A model or base-model
+file that is missing on disk is listed under `missing_files` instead of failing; a missing scan or working copy refuses
+the export. The CLI writes `<file>.part` and renames it, and never overwrites an existing file.
+
+**Import** (`POST /bundle/import` multipart `file`, **Import project bundle** on the Export page,
+`python scripts/htr.py bundle import <file>`):
+
+- **Only into an empty project; v1 never merges.** Empty means the database has no documents, pages, lines, fine-tuned
+  models, abbreviations, review events and jobs. The base-model rows created at startup do not count. Anything else is
+  refused with **409** naming what is there (`the project is not empty (3 documents, 10 pages)`), and nothing is touched.
+- The bundle is validated completely **before** the project is touched, in a staging directory inside the data directory:
+  zip entries must be regular files with relative, forward-slash paths without `..` and only under `db/ originals/ working/
+  pagexml/ models/` (zip-slip, absolute paths, symlinks, duplicates, unlisted or missing entries are refused); every file's
+  size and SHA-256 must match the manifest, the manifest must match its own checksum, its counts and `schema_version` must
+  match the database, the database must pass `integrity_check`, contain only tables and indexes, have only relative paths
+  inside the allowed folders and every referenced file must exist. Damaged, truncated or tampered bundles give **422**.
+- `schema_version` newer than this app: refused (**422**, "made by a newer version of the app"). Older: the restored
+  database is migrated with the normal migration runner before it is swapped in.
+- The swap: files are moved into the data directory (a file that already exists with identical content is left alone; a
+  different file at the same path is a conflict and nothing is overwritten), then the database file is replaced by two
+  renames. Every step is recorded in an undo log: if anything fails, the added files are removed and the old database is
+  put back, so the project is exactly as it was.
+- **Running work:** the import is refused with 409 while a job is queued or running. While it runs the server is in
+  maintenance mode: other requests get **503** (`/health` stays up), the background worker is stopped and restarted after the
+  swap, and the import waits (at most 15 s) for requests that were already running (for example a bundle download);
+  if they do not finish it gives up with 409. The command-line import takes an exclusive lock on the data directory, so it
+  refuses (and tells you to stop the server) while a server is running there.
+- After an import the app works immediately: pages, lines, ground-truth and ignored flags, models and the active model,
+  abbreviations, review events, job history and PAGE-XML are exactly the exported ones (ids included).
+
+Large bundles: the upload is spooled to disk by the server (not held in memory) and extracted file by file; you need free disk
+space for about twice the bundle size while it is imported.
+
+### Tests for M6
+
+`make test` covers the expansion engine (`test_abbreviations.py`), the dictionary / expansion / export API
+(`test_api_abbreviations.py`, `test_api_export.py`) and the bundle (`test_bundle.py`): the round trip through the real API
+into a fresh data directory with every table, every project file byte for byte, PAGE-XML in sync and the API output compared;
+a bundle from a schema-3 database migrated on import; refusals for a non-empty project, running jobs, corrupted checksums,
+tampered manifests, a newer schema or bundle format, zip-slip / absolute / symlink entries, hostile database paths,
+truncated zips; faults injected at every step of the import (the project must be untouched afterwards); streaming in
+chunks; a WAL-consistent snapshot; maintenance mode; and the CLI. `make test-train` additionally runs the real thing
+(`test_bundle_real.py`: real fine-tune, bundle, import into a directory without any base model, real prediction with the
+imported model giving the same texts). `make test-frontend` and `make test-e2e` cover the three new pages; the e2e test
+adds abbreviations, exports expanded text, exports a bundle through the UI, sees the UI refuse an import into the
+non-empty project and imports the bundle into a second, fresh backend that it compares through the API.
+
 ## Inspecting a folder of scans
 
 ```
@@ -463,7 +590,7 @@ curl -s localhost:8000/pages/1                        # the page with its lines
 | `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/cancel` | job status, progress, errors; cancel queued jobs |
 
 Details and rules: [docs/api.md](docs/api.md). Training, prediction and model endpoints arrived in M4 (below).
-Not implemented yet: abbreviations endpoints, export.
+Abbreviations, export and the project bundle arrived in M6 (below).
 
 ### Data layout
 
