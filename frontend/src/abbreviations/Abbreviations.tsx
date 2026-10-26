@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "../api/client";
 import type { Abbreviation, ExpandResult, OccurrencePage } from "../api/types";
 import { pageHash } from "../router";
+import { Suggestions } from "./Suggestions";
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const PAGE = 25;
@@ -309,6 +310,8 @@ export function Abbreviations({ api }: { api: ApiClient }) {
           </table>
         )}
       </section>
+
+      <Suggestions api={api} onAccepted={() => void refresh()} />
 
       <section className="panel" aria-labelledby="try-heading">
         <h2 id="try-heading">Try the dictionary</h2>

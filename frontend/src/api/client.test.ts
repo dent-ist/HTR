@@ -107,9 +107,40 @@ describe("ApiClient", () => {
       [
         "POST",
         "/pages/3/restore",
-        { force: true, lines: [{ id: 1, baseline: [[0, 0], [1, 1]], polygon: [[0, 0], [1, 0], [1, 1]], text: "", text_source: null, confidence: null, is_ground_truth: false, ignored: false }] },
+        { force: true, lines: [{ id: 1, baseline: [[0, 0], [1, 1]], polygon: [[0, 0], [1, 0], [1, 1]], text: "", text_source: null, confidence: null, predicted_by_model_id: null, predicted_text: null, is_ground_truth: false, ignored: false }] },
       ],
       ["DELETE", "/lines/9", null],
+    ]);
+  });
+
+  it("gives a line's prediction state back on restore (undo)", async () => {
+    const { api, spy } = client(() => jsonResponse({}));
+    const line = { id: 1, baseline: [[0, 0], [1, 1]], polygon: [[0, 0], [1, 0], [1, 1]], text: "hello wxrld", text_source: "predicted", confidence: 0.9, predicted_by_model_id: 4, predicted_text: "hello wxrld", is_ground_truth: false, ignored: false, page_id: 3, index: 0, crop_url: "" };
+    await api.restore(3, [line as never]);
+    const sent = JSON.parse(String(spy.mock.calls[0]![1]!.body)).lines[0];
+    expect(sent).toMatchObject({ predicted_by_model_id: 4, predicted_text: "hello wxrld", text_source: "predicted", confidence: 0.9 });
+  });
+
+  it("calls the health and suggestion endpoints", async () => {
+    const { api, spy } = client(() => jsonResponse({}));
+    await api.getHealth();
+    await api.getHealthDetails();
+    await api.listSuggestions();
+    await api.listSuggestions("all");
+    await api.generateSuggestions({ tokens: ["c/o"], max_tokens: 5 });
+    await api.acceptSuggestion(3);
+    await api.acceptSuggestion(4, { expansion: "as needed" });
+    await api.rejectSuggestion(5);
+    const calls = spy.mock.calls.map(([url, init]) => [init?.method, String(url).replace("http://api.test", ""), init?.body ? JSON.parse(String(init.body)) : null]);
+    expect(calls).toEqual([
+      ["GET", "/health", null],
+      ["GET", "/health/details", null],
+      ["GET", "/abbreviations/suggestions?status=pending", null],
+      ["GET", "/abbreviations/suggestions?status=all", null],
+      ["POST", "/abbreviations/suggestions/generate", { tokens: ["c/o"], max_tokens: 5 }],
+      ["POST", "/abbreviations/suggestions/3/accept", {}],
+      ["POST", "/abbreviations/suggestions/4/accept", { expansion: "as needed" }],
+      ["POST", "/abbreviations/suggestions/5/reject", null],
     ]);
   });
 

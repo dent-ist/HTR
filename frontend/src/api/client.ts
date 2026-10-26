@@ -4,6 +4,7 @@ import type {
   BundleImportResult,
   Document,
   ExpandResult,
+  HealthDetails,
   ExportOptions,
   IgnoreRegionResult,
   OccurrencePage,
@@ -25,6 +26,10 @@ import type {
   ReviewStats,
   SplitResult,
   StartedJob,
+  Suggestion,
+  SuggestionEdits,
+  SuggestionList,
+  SuggestOptions,
   TrainOptions,
   TrainingSummary,
   UploadResult,
@@ -38,14 +43,33 @@ export function apiBaseFromEnv(): string {
   return (v || DEFAULT_API_BASE).replace(/\/+$/, "");
 }
 
+/**
+ * An error from the API (or from reaching it). The server's errors all have the same shape
+ * `{detail, code, message, hint}`; `message` here is the readable message followed by the hint (what to do), so every
+ * place that shows `error.message` gets the advice for free. `status` is 0 when the server could not be reached.
+ */
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
+  /** Stable machine-readable id such as "file_missing" or "db_locked" (null for old servers / plain HTTP errors). */
+  readonly code: string | null;
+  /** The readable message alone, without the hint. */
+  readonly reason: string;
+  readonly hint: string | null;
+  constructor(status: number, message: string, code: string | null = null, hint: string | null = null) {
+    super(hint ? `${message} ${hint}` : message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
+    this.reason = message;
+    this.hint = hint;
   }
 }
+
+/** What listeners (the status bar) hear about every request. */
+export type ApiEvent =
+  | { type: "ok" }
+  | { type: "network"; message: string }
+  | { type: "server"; message: string; status: number };
 
 /** FastAPI errors are `{detail: string}` or `{detail: [{loc, msg, type}]}`. */
 export function describeDetail(detail: unknown): string {
@@ -67,6 +91,7 @@ export type FetchLike = typeof fetch;
 export class ApiClient {
   readonly base: string;
   private readonly fetchImpl: FetchLike;
+  private readonly listeners = new Set<(e: ApiEvent) => void>();
 
   constructor(base: string = apiBaseFromEnv(), fetchImpl?: FetchLike) {
     this.base = base.replace(/\/+$/, "");
@@ -78,6 +103,51 @@ export class ApiClient {
     return /^https?:\/\//.test(path) ? path : this.base + path;
   }
 
+  /** Be told about lost connections, server errors and recovery. Returns the unsubscribe function. */
+  subscribe(listener: (e: ApiEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private emit(e: ApiEvent): void {
+    for (const l of this.listeners) l(e);
+  }
+
+  /** fetch + the same error handling for every call: unreachable server, error bodies, events for the status bar. */
+  private async send(path: string, init: RequestInit): Promise<Response> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(this.url(path), init);
+    } catch (e) {
+      const err = new ApiError(
+        0,
+        `Cannot reach the API at ${this.base} (${e instanceof Error ? e.message : String(e)}).`,
+        "network",
+        "Is the app running? Start it with `make dev` in the project folder.",
+      );
+      this.emit({ type: "network", message: err.message });
+      throw err;
+    }
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      let code: string | null = null;
+      let hint: string | null = null;
+      try {
+        const body = (await res.json()) as { detail?: unknown; message?: unknown; code?: unknown; hint?: unknown };
+        message = typeof body.message === "string" && body.message ? body.message : describeDetail(body.detail);
+        code = typeof body.code === "string" ? body.code : null;
+        hint = typeof body.hint === "string" ? body.hint : null;
+      } catch {
+        /* non-JSON error body */
+      }
+      const err = new ApiError(res.status, message, code, hint);
+      if (res.status >= 500) this.emit({ type: "server", message: err.message, status: res.status });
+      throw err;
+    }
+    this.emit({ type: "ok" });
+    return res;
+  }
+
   private async request<T>(method: string, path: string, init: { json?: unknown; form?: FormData } = {}): Promise<T> {
     const headers: Record<string, string> = {};
     let body: BodyInit | undefined;
@@ -87,21 +157,7 @@ export class ApiClient {
     } else if (init.form) {
       body = init.form;
     }
-    let res: Response;
-    try {
-      res = await this.fetchImpl(this.url(path), { method, headers, body });
-    } catch (e) {
-      throw new ApiError(0, `Cannot reach the API at ${this.base} (${e instanceof Error ? e.message : String(e)})`);
-    }
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try {
-        msg = describeDetail(((await res.json()) as { detail?: unknown }).detail);
-      } catch {
-        /* non-JSON error body */
-      }
-      throw new ApiError(res.status, msg);
-    }
+    const res = await this.send(path, { method, headers, body });
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
   }
@@ -165,6 +221,9 @@ export class ApiClient {
       text: l.text ?? "",
       text_source: l.text ? l.text_source : null,
       confidence: l.confidence,
+      // given back exactly as the line had them, so undo restores which model predicted what
+      predicted_by_model_id: l.predicted_by_model_id ?? null,
+      predicted_text: l.predicted_text ?? null,
       is_ground_truth: l.is_ground_truth,
       ignored: l.ignored,
     }));
@@ -216,6 +275,30 @@ export class ApiClient {
     return this.request("POST", "/jobs/predict", { json: options });
   }
 
+  // ---- health ----
+  /** Cheap liveness probe. */
+  getHealth(): Promise<{ status: string }> {
+    return this.request("GET", "/health");
+  }
+  /** Startup self-checks: database, data folder, disk, GPU, base model, worker (and the local LLM when enabled). */
+  getHealthDetails(): Promise<HealthDetails> {
+    return this.request("GET", "/health/details");
+  }
+
+  // ---- optional local-LLM abbreviation suggestions ----
+  listSuggestions(status: "pending" | "accepted" | "rejected" | "all" = "pending"): Promise<SuggestionList> {
+    return this.request("GET", `/abbreviations/suggestions?status=${status}`);
+  }
+  generateSuggestions(options: SuggestOptions = {}): Promise<Job> {
+    return this.request("POST", "/abbreviations/suggestions/generate", { json: options });
+  }
+  acceptSuggestion(id: number, edits: SuggestionEdits = {}): Promise<{ suggestion: Suggestion; abbreviation: Abbreviation }> {
+    return this.request("POST", `/abbreviations/suggestions/${id}/accept`, { json: edits });
+  }
+  rejectSuggestion(id: number): Promise<Suggestion> {
+    return this.request("POST", `/abbreviations/suggestions/${id}/reject`);
+  }
+
   // ---- abbreviations ----
   listAbbreviations(filter: { q?: string; ambiguous?: boolean; sort?: "written" | "count" } = {}): Promise<Abbreviation[]> {
     const q = new URLSearchParams();
@@ -260,21 +343,7 @@ export class ApiClient {
   }
   /** Fetch an export (small: text or a zip of PAGE-XML) so errors can be shown inline. */
   async exportBlob(o: ExportOptions): Promise<Blob> {
-    let res: Response;
-    try {
-      res = await this.fetchImpl(this.url(this.exportPath(o)));
-    } catch (e) {
-      throw new ApiError(0, `Cannot reach the API at ${this.base} (${e instanceof Error ? e.message : String(e)})`);
-    }
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try {
-        msg = describeDetail(((await res.json()) as { detail?: unknown }).detail);
-      } catch {
-        /* non-JSON error body */
-      }
-      throw new ApiError(res.status, msg);
-    }
+    const res = await this.send(this.exportPath(o), {});
     return res.blob();
   }
   /** The bundle is streamed by the browser straight to a file the user chooses: use this as a link target. */

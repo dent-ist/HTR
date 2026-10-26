@@ -3,6 +3,7 @@ import type { ApiClient } from "../api/client";
 import type { Job, Model, PredictResult, ReviewStats, TrainResult, TrainingSummary } from "../api/types";
 import { CerChart } from "./CerChart";
 import { EffortCharts } from "./EffortCharts";
+import { jobProblem } from "../library/format";
 import { dateLabel, isActive, modelLabel, pct } from "./format";
 
 const POLL_MS = 1000;
@@ -472,11 +473,16 @@ function TrainStatus({ job, onCancel }: { job: Job; onCancel(): void }) {
               {w}
             </div>
           ))}
+          {r.notices?.map((n) => (
+            <div key={n} className="job-notice" data-testid="job-notice">
+              {n}
+            </div>
+          ))}
         </div>
       )}
       {job.status === "failed" && (
         <div className="error" role="alert">
-          {job.error}
+          {jobProblem(job)}
         </div>
       )}
     </div>
@@ -503,6 +509,12 @@ function PredictStatus({ job, onCancel }: { job: Job; onCancel(): void }) {
           {job.cancel_requested ? "Stopping..." : "Cancel"}
         </button>
       )}
+      {job.status === "succeeded" &&
+        r.notices?.map((n) => (
+          <div key={n} className="job-notice" data-testid="job-notice">
+            {n}
+          </div>
+        ))}
       {job.status === "succeeded" && r.mean_confidence !== null && r.mean_confidence !== undefined && (
         <div className="small muted">
           Average confidence {pct(r.mean_confidence, 0)}. Confidence ranks lines for review (lowest first); it is not a probability of being right.
@@ -510,7 +522,7 @@ function PredictStatus({ job, onCancel }: { job: Job; onCancel(): void }) {
       )}
       {job.status === "failed" && (
         <div className="error" role="alert">
-          {job.error}
+          {jobProblem(job)}
         </div>
       )}
     </div>

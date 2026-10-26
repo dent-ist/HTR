@@ -35,6 +35,7 @@ function setup(items: Abbreviation[] = [PT, SOB1, SOB2, CO]) {
   const api = new ApiClient("http://api.test");
   let rows = [...items];
   vi.spyOn(api, "listAbbreviations").mockImplementation(async () => rows);
+  vi.spyOn(api, "listSuggestions").mockResolvedValue({ enabled: false, backend: null, items: [] });
   const create = vi.spyOn(api, "createAbbreviation").mockImplementation(async (input) => {
     const a = abbr(99, input.written, input.expansion, { notes: input.notes ?? null, case_sensitive: !!input.case_sensitive });
     rows = [...rows, a];
@@ -202,6 +203,7 @@ describe("Abbreviations page", () => {
   it("shows a load error with a retry", async () => {
     const api = new ApiClient("http://api.test");
     const list = vi.spyOn(api, "listAbbreviations").mockRejectedValueOnce(new Error("boom")).mockResolvedValue([PT]);
+    vi.spyOn(api, "listSuggestions").mockResolvedValue({ enabled: false, backend: null, items: [] });
     render(<Abbreviations api={api} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));

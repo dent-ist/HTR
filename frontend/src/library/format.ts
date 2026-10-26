@@ -9,6 +9,10 @@ const LABELS: Record<PageStatus, string> = {
 
 export const statusLabel = (s: PageStatus): string => LABELS[s] ?? s;
 
+/** A failed job's message followed by what the user can do about it. */
+export const jobProblem = (j: Pick<Job, "error" | "error_hint">): string =>
+  [j.error, j.error_hint].filter(Boolean).join(" ");
+
 export const jobIsActive = (j: Job): boolean => j.status === "queued" || j.status === "running";
 
 export function jobLabel(j: Job): string {

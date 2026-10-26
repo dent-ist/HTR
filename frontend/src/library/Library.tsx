@@ -3,7 +3,7 @@ import { ApiError, type ApiClient } from "../api/client";
 import type { Document, Job, Page } from "../api/types";
 import { ABBREVIATIONS_HASH, EXPORT_HASH, pageHash, REVIEW_HASH, TRAINING_HASH } from "../router";
 import { RetrainNotice } from "../training/RetrainNotice";
-import { jobIsActive, jobLabel, progressOf, statusLabel } from "./format";
+import { jobIsActive, jobLabel, jobProblem, progressOf, statusLabel } from "./format";
 
 const POLL_MS = 1000;
 const ACCEPT = "image/png,image/jpeg,image/tiff,.png,.jpg,.jpeg,.tif,.tiff";
@@ -326,7 +326,7 @@ function PageRow({ page, job, segError, onSegment }: { page: Page; job: Job | un
           <div className={`job ${job.status}`} role="status">
             {jobLabel(job)}
             {active && <progress value={job.progress} max={1} aria-label="Segmentation progress" />}
-            {job.status === "failed" && job.error && <div className="error">Segmentation failed: {job.error}</div>}
+            {job.status === "failed" && job.error && <div className="error">Segmentation failed: {jobProblem(job)}</div>}
           </div>
         )}
         {segError && (

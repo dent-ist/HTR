@@ -22,6 +22,8 @@ export interface Line {
   confidence: number | null;
   /** The model whose prediction this line still holds (null once reviewed or never predicted). */
   predicted_by_model_id?: number | null;
+  /** What that model predicted (the snapshot review effort is measured against). */
+  predicted_text?: string | null;
   is_ground_truth: boolean;
   ignored: boolean;
   crop_url: string;
@@ -61,6 +63,9 @@ export interface Job {
   payload: Record<string, unknown>;
   progress: number;
   error: string | null;
+  /** Stable id of the failure (for example "file_missing") and what the user can do about it. */
+  error_code?: string | null;
+  error_hint?: string | null;
   cancel_requested?: boolean;
   result: unknown;
   created_at: string;
@@ -204,6 +209,8 @@ export interface TrainResult {
   peak_vram_mb?: number | null;
   seconds?: number;
   warnings?: string[];
+  /** Visible, non-fatal remarks, for example "running on the CPU because no GPU was found". */
+  notices?: string[];
   next_job_id?: number;
 }
 
@@ -218,6 +225,7 @@ export interface PredictResult {
   mean_confidence?: number | null;
   device?: string | null;
   cuda_fallback?: boolean;
+  notices?: string[];
 }
 
 // ---- review queue and effort (M5) ----
@@ -373,4 +381,56 @@ export interface BundleImportResult {
   bundle_app_version: string | null;
   files: number;
   missing_files: string[];
+}
+
+// ---- health and error format (M7) ----
+
+export interface HealthCheck {
+  id: string;
+  label: string;
+  status: "ok" | "warn" | "error";
+  message: string;
+  hint: string | null;
+}
+
+export interface HealthDetails {
+  status: "ok" | "warning" | "error";
+  version: string;
+  checks: HealthCheck[];
+}
+
+// ---- optional local-LLM abbreviation suggestions (M7) ----
+
+export interface Suggestion {
+  id: number;
+  written: string;
+  expansion: string;
+  rationale: string;
+  line_id: number | null;
+  /** The line the suggestion was made from. */
+  context: string;
+  model: string | null;
+  status: "pending" | "accepted" | "rejected";
+  abbreviation_id: number | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface SuggestionList {
+  enabled: boolean;
+  backend: { api: string; url: string; model: string } | null;
+  items: Suggestion[];
+}
+
+export interface SuggestOptions {
+  tokens?: string[];
+  max_tokens?: number;
+  context_lines?: number;
+}
+
+export interface SuggestionEdits {
+  written?: string;
+  expansion?: string;
+  notes?: string;
+  case_sensitive?: boolean;
 }
