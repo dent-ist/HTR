@@ -130,6 +130,21 @@ def import_folder(
                 if info.deskewed:
                     notes.append(f"deskewed {info.skew_deg:g} deg")
                 rec["notes"] = notes
+                # One measurement for report and rescale decision: the normalized, deskewed image. (Measuring the
+                # raw original gave band heights up to 35% larger on slightly skewed pages.)
+                rep = measure.ImageReport(
+                    path=rec["source_name"],
+                    width=rec["width"],
+                    height=rec["height"],
+                    dpi_x=rec["dpi"][0],
+                    dpi_y=rec["dpi"][1],
+                    line_height_px=info.line_height_before,
+                    line_pitch_px=info.line_pitch_before,
+                    n_lines=info.n_lines,
+                )
+                rec["line_height_px"] = rep.line_height_px
+                rec["line_pitch_px"] = rep.line_pitch_px
+                rec["warnings"] = measure.image_warnings(rep)
         except Exception as e:  # noqa: BLE001  one bad file must not abort the batch
             stats["failed"] += 1
             log(f"FAILED {src.name}: {type(e).__name__}: {e}")

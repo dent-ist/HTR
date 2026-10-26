@@ -25,7 +25,9 @@ MAX_SCALE = 4.0  # never scale by more than this factor either way
 class PreprocessInfo:
     skew_deg: float = 0.0
     deskewed: bool = False
-    line_height_before: float | None = None
+    line_height_before: float | None = None  # measured on the normalized, deskewed image (rescale decision)
+    line_pitch_before: float | None = None
+    n_lines: int = 0
     line_height_after: float | None = None
     scale: float = 1.0
     rescaled: bool = False
@@ -103,8 +105,10 @@ def preprocess_array(
         if MIN_SKEW_DEG <= abs(angle) <= MAX_SKEW_DEG:
             g = rotate_gray(g, -angle)
             info.deskewed = True
-    lh, _, _ = estimate_line_height(g)
+    lh, pitch, n_lines = estimate_line_height(g)  # after deskew: band thickness is skew-sensitive
     info.line_height_before = None if lh is None else round(lh, 1)
+    info.line_pitch_before = None if pitch is None else round(pitch, 1)
+    info.n_lines = n_lines
     factor = scale_factor(lh, target_line_height)
     img = Image.fromarray(np.clip(g, 0, 255).astype(np.uint8), "L")
     if abs(factor - 1.0) > 1e-6:

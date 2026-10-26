@@ -76,7 +76,7 @@ def test_cli_end_to_end_with_review(tmp_path, fake_blla, capsys):
     assert review_sheet.main(["--data", d, "sample", "-n", "5"]) == 0
     sheet = tmp_path / "data" / "review_sheet.csv"
     lines = sheet.read_text().splitlines()
-    sheet.write_text("\n".join([lines[0]] + [ln.replace(",4,,", ",4,4,") for ln in lines[1:]]) + "\n")
+    sheet.write_text("\n".join([lines[0]] + [ln.replace(",4,,,", ",4,4,0,") for ln in lines[1:]]) + "\n")
     assert review_sheet.main(["--data", d, "score"]) == 0
     out = capsys.readouterr().out
     assert "100.0%" in out and "PROCEED" in out
@@ -86,3 +86,21 @@ def test_cli_errors(tmp_path):
     assert htr.main(["--data", str(tmp_path / "d"), "segment"]) == 2
     assert htr.main(["--data", str(tmp_path / "d"), "import", str(tmp_path / "nope")]) == 2
     assert review_sheet.main(["--data", str(tmp_path / "d"), "sample"]) == 2
+
+
+def test_reported_line_height_matches_working_copy_measurement(tmp_path):
+    """Report and rescale decision use the same (deskewed) measurement; the working copy re-measures the same."""
+    from app.pipeline import measure
+
+    scans = tmp_path / "scans"
+    scans.mkdir()
+    page = render_page(np.random.default_rng(3), available_fonts()[0], font_size=44, n_lines=8, skew_deg=1.5)
+    page.image.save(scans / "skewed.png")
+    data = Workspace(tmp_path / "data")
+    import_folder(scans, data, log=quiet)
+    (rec,) = data.load().values()
+    assert rec["preprocess"]["deskewed"] and not rec["preprocess"]["rescaled"]
+    assert rec["line_height_px"] == rec["preprocess"]["line_height_before"]
+    work = measure.inspect_image(data.root / rec["working"])
+    assert work.line_height_px == rec["line_height_px"]
+    assert work.line_pitch_px == rec["line_pitch_px"]
