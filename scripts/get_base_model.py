@@ -54,8 +54,9 @@ def main(argv: list[str] | None = None) -> int:
         "doi": args.doi,
         "title": desc.summary,
         "license": desc.license,
-        "language": list(desc.language or []),
-        "reported_cer_percent": (desc.metrics or {}).get("cer"),
+        # older (v0) repository records have no `language` / `metrics` fields
+        "language": list(getattr(desc, "language", None) or []),
+        "reported_cer_percent": (getattr(desc, "metrics", None) or {}).get("cer"),
         "file": str(model.relative_to(tmp)),
         "sha256": hashlib.sha256(model.read_bytes()).hexdigest(),
     }

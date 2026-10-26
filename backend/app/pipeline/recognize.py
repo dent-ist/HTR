@@ -110,6 +110,10 @@ class TrainRequest:
     num_workers: int = 0
     augment: bool = True
     seed: int = 1234
+    # Experiments only (never set by the app's jobs): train a new network from random weights with the VGSL spec
+    # `spec` (the output layer is appended from the data's alphabet) instead of fine-tuning `start_model`.
+    from_scratch: bool = False
+    spec: str | None = None
 
 
 @dataclass

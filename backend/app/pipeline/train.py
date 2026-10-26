@@ -171,9 +171,14 @@ class KrakenTrainer(Trainer):
             torch.cuda.reset_peak_memory_stats()
         t0 = time.time()
         with trainer.init_module(empty_init=False):
-            model = VGSLRecognitionModel.load_from_weights(str(req.start_model), config=cfg)
+            if req.from_scratch:
+                if req.spec:
+                    cfg.spec = req.spec
+                model = VGSLRecognitionModel(config=cfg)
+            else:
+                model = VGSLRecognitionModel.load_from_weights(str(req.start_model), config=cfg)
         data_module = VGSLRecognitionDataModule(data_cfg)
-        labels_before = model.net.codec.max_label if model.net.codec else 0
+        labels_before = model.net.codec.max_label if model.net is not None and model.net.codec else 0
         trainer.fit(model, data_module)
         if state["cancelled"]:
             raise Cancelled()
