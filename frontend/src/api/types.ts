@@ -265,3 +265,112 @@ export interface ReviewStats {
   total_reviewed: number;
   accepted_rate: number | null;
 }
+
+// ---- M6: abbreviations, export, project bundle ----
+
+export interface AbbreviationCandidate {
+  id: number;
+  expansion: string;
+}
+
+export interface Abbreviation {
+  id: number;
+  written: string;
+  expansion: string;
+  notes: string | null;
+  case_sensitive: boolean;
+  /** Occurrences in the text of non-ignored lines (computed live). */
+  count: number;
+  /** Another row can match the same token with a different expansion. */
+  ambiguous: boolean;
+  /** All competing expansions (this row's own first) when ambiguous, else empty. */
+  candidates: AbbreviationCandidate[];
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AbbreviationInput {
+  written: string;
+  expansion: string;
+  notes?: string | null;
+  case_sensitive?: boolean;
+}
+
+export interface Occurrence {
+  line_id: number;
+  page_id: number;
+  document_id: number;
+  document_name: string;
+  page_filename: string;
+  line_index: number;
+  text: string;
+  text_source: "manual" | "predicted" | null;
+  start: number;
+  end: number;
+  ambiguous: boolean;
+}
+
+export interface OccurrencePage {
+  total: number;
+  limit: number;
+  offset: number;
+  items: Occurrence[];
+}
+
+export type SpanStatus = "expanded" | "ambiguous" | "unmatched";
+
+export interface ExpandSpan {
+  start: number;
+  end: number;
+  written: string;
+  expansion: string | null;
+  status: SpanStatus;
+  candidates: string[];
+  entry_ids: number[];
+}
+
+export interface ExpandResult {
+  text: string;
+  spans: ExpandSpan[];
+}
+
+export interface PageTextLine {
+  line_id: number;
+  index: number;
+  raw: string;
+  expanded: string;
+  text_source: "manual" | "predicted" | null;
+  is_ground_truth: boolean;
+  confidence: number | null;
+  spans: ExpandSpan[];
+}
+
+export interface PageText {
+  page_id: number;
+  document_id: number;
+  expanded: boolean;
+  ambiguous: "raw" | "mark";
+  include_predicted: boolean;
+  lines: PageTextLine[];
+  text: string;
+}
+
+export interface ExportOptions {
+  format: "txt" | "pagexml";
+  expanded: boolean;
+  /** How ambiguous abbreviations appear in expanded text: as written, or marked `[?]`. */
+  ambiguous: "raw" | "mark";
+  document_id?: number;
+  include_predicted: boolean;
+}
+
+export interface BundleImportResult {
+  imported: boolean;
+  counts: Record<string, number>;
+  schema_version: number;
+  migrated_from: number | null;
+  bundle_created_at: string | null;
+  bundle_app_version: string | null;
+  files: number;
+  missing_files: string[];
+}

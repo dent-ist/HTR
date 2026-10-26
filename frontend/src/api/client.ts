@@ -1,6 +1,13 @@
 import type {
+  Abbreviation,
+  AbbreviationInput,
+  BundleImportResult,
   Document,
+  ExpandResult,
+  ExportOptions,
   IgnoreRegionResult,
+  OccurrencePage,
+  PageText,
   Job,
   JobStatus,
   Line,
@@ -207,5 +214,76 @@ export class ApiClient {
   }
   startPrediction(options: PredictOptions = {}): Promise<StartedJob> {
     return this.request("POST", "/jobs/predict", { json: options });
+  }
+
+  // ---- abbreviations ----
+  listAbbreviations(filter: { q?: string; ambiguous?: boolean; sort?: "written" | "count" } = {}): Promise<Abbreviation[]> {
+    const q = new URLSearchParams();
+    if (filter.q) q.set("q", filter.q);
+    if (filter.ambiguous !== undefined) q.set("ambiguous", String(filter.ambiguous));
+    if (filter.sort) q.set("sort", filter.sort);
+    const qs = q.toString();
+    return this.request("GET", "/abbreviations" + (qs ? `?${qs}` : ""));
+  }
+  createAbbreviation(input: AbbreviationInput): Promise<Abbreviation> {
+    return this.request("POST", "/abbreviations", { json: input });
+  }
+  patchAbbreviation(id: number, patch: Partial<AbbreviationInput>): Promise<Abbreviation> {
+    return this.request("PATCH", `/abbreviations/${id}`, { json: patch });
+  }
+  deleteAbbreviation(id: number): Promise<void> {
+    return this.request("DELETE", `/abbreviations/${id}`);
+  }
+  abbreviationOccurrences(id: number, limit = 50, offset = 0): Promise<OccurrencePage> {
+    return this.request("GET", `/abbreviations/${id}/occurrences?limit=${limit}&offset=${offset}`);
+  }
+  expandText(text: string, ambiguous: "raw" | "mark" = "raw"): Promise<ExpandResult> {
+    return this.request("POST", "/expand", { json: { text, ambiguous } });
+  }
+  pageText(id: number, opts: { ambiguous?: "raw" | "mark"; include_predicted?: boolean } = {}): Promise<PageText> {
+    const q = new URLSearchParams({ expanded: "true" });
+    if (opts.ambiguous) q.set("ambiguous", opts.ambiguous);
+    if (opts.include_predicted !== undefined) q.set("include_predicted", String(opts.include_predicted));
+    return this.request("GET", `/pages/${id}/text?${q.toString()}`);
+  }
+
+  // ---- export and project bundle ----
+  /** Server path of an export; also usable as a plain link. */
+  exportPath(o: ExportOptions): string {
+    const q = new URLSearchParams({ format: o.format, include_predicted: String(o.include_predicted) });
+    if (o.format === "txt") {
+      q.set("expanded", String(o.expanded));
+      q.set("ambiguous", o.ambiguous);
+    }
+    if (o.document_id !== undefined) q.set("document_id", String(o.document_id));
+    return `/export?${q.toString()}`;
+  }
+  /** Fetch an export (small: text or a zip of PAGE-XML) so errors can be shown inline. */
+  async exportBlob(o: ExportOptions): Promise<Blob> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(this.url(this.exportPath(o)));
+    } catch (e) {
+      throw new ApiError(0, `Cannot reach the API at ${this.base} (${e instanceof Error ? e.message : String(e)})`);
+    }
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        msg = describeDetail(((await res.json()) as { detail?: unknown }).detail);
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new ApiError(res.status, msg);
+    }
+    return res.blob();
+  }
+  /** The bundle is streamed by the browser straight to a file the user chooses: use this as a link target. */
+  bundleExportUrl(): string {
+    return this.url("/bundle/export");
+  }
+  importBundle(file: File): Promise<BundleImportResult> {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return this.request("POST", "/bundle/import", { form });
   }
 }

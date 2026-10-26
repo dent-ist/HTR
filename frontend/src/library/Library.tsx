@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, type ApiClient } from "../api/client";
 import type { Document, Job, Page } from "../api/types";
-import { pageHash, REVIEW_HASH, TRAINING_HASH } from "../router";
+import { ABBREVIATIONS_HASH, EXPORT_HASH, pageHash, REVIEW_HASH, TRAINING_HASH } from "../router";
 import { RetrainNotice } from "../training/RetrainNotice";
 import { jobIsActive, jobLabel, progressOf, statusLabel } from "./format";
 
@@ -147,6 +147,12 @@ export function Library({ api }: { api: ApiClient }) {
           </a>
           <a className="button" href={REVIEW_HASH}>
             Review
+          </a>
+          <a className="button" href={ABBREVIATIONS_HASH}>
+            Abbreviations
+          </a>
+          <a className="button" href={EXPORT_HASH}>
+            Export
           </a>
         </span>
         <form onSubmit={createDoc} className="new-doc">

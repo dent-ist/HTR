@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../api/client";
 import type { Page, PageDetail } from "../api/types";
-import { navigate, pageHash, REVIEW_HASH, setNavigationGuard } from "../router";
+import { navigate, pageHash, REVIEW_HASH, setNavigationGuard, textHash } from "../router";
 import { HelpOverlay } from "./HelpOverlay";
 import { PageCanvas, type CanvasEvent, type PageCanvasHandle } from "./PageCanvas";
 import { type ModeKind, modeHelp } from "./modes";
@@ -21,7 +21,8 @@ const MODE_LABEL: Record<ModeKind, string> = {
   region: "Ignore region",
 };
 
-export function PageEditor({ api, pageId }: { api: ApiClient; pageId: number }) {
+/** `lineId`: open with this line selected (links from the Abbreviations page use `#/pages/<id>?line=<line id>`). */
+export function PageEditor({ api, pageId, lineId }: { api: ApiClient; pageId: number; lineId?: number }) {
   const [page, setPage] = useState<PageDetail | null>(null);
   const [siblings, setSiblings] = useState<Page[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -43,7 +44,8 @@ export function PageEditor({ api, pageId }: { api: ApiClient; pageId: number }) 
       .then((p) => {
         if (!live) return;
         setPage(p);
-        dispatch({ type: "loaded", lines: p.lines });
+        const wanted = lineId !== undefined && p.lines.some((l) => l.id === lineId) ? lineId : undefined;
+        dispatch({ type: "loaded", lines: p.lines, selectId: wanted });
         api
           .listPages({ document_id: p.document_id })
           .then((ps) => live && setSiblings(ps))
@@ -53,7 +55,13 @@ export function PageEditor({ api, pageId }: { api: ApiClient; pageId: number }) 
     return () => {
       live = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lineId only picks the initial selection (see below)
   }, [api, pageId, dispatch]);
+
+  // A link to another line of the page that is already open selects that line.
+  useEffect(() => {
+    if (lineId !== undefined) dispatch({ type: "select", id: lineId });
+  }, [lineId, dispatch]);
 
   const unsaved = hasUnsaved(state);
   const unsavedRef = useRef(unsaved);
@@ -209,6 +217,9 @@ export function PageEditor({ api, pageId }: { api: ApiClient; pageId: number }) 
         <button onClick={() => navigate("#/")}>&larr; Library</button>
         <button onClick={() => navigate(REVIEW_HASH)} title="Review the least certain predictions first">
           Review
+        </button>
+        <button onClick={() => navigate(textHash(pageId))} title="Raw and expanded text side by side">
+          Text view
         </button>
         <h1 title={page.original_filename}>{page.original_filename}</h1>
         <span className="muted" data-testid="progress">

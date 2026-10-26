@@ -767,3 +767,166 @@ kbd {
 .round-status {
   margin: 0.5rem 0 0;
 }
+
+/* ---------------- abbreviations, export, text view (M6) ---------------- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+input[type="search"],
+select,
+textarea {
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+}
+textarea {
+  width: 100%;
+  resize: vertical;
+}
+label.block {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+.abbr-form,
+.abbr-tools,
+.export-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: flex-end;
+  margin: 0.4rem 0;
+}
+.abbr-form label,
+.abbr-tools label,
+.export-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+label.check,
+.abbr-form label.check,
+.export-form label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text);
+  font-size: 1em;
+}
+.export-form fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.8rem 0.5rem;
+}
+.export-form fieldset legend {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.export-form fieldset label {
+  display: flex;
+}
+.abbr-table,
+.text-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.4rem;
+}
+.abbr-table th,
+.abbr-table td,
+.text-table th,
+.text-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.abbr-table thead th,
+.text-table thead th {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.abbr-table tbody th {
+  font-weight: 600;
+}
+.row-actions button {
+  margin-right: 0.3rem;
+}
+.badge.amb {
+  background: #fff1d6;
+  color: var(--warn);
+  border: 1px solid #e3b865;
+  margin-left: 0.4rem;
+}
+.occ-list {
+  margin: 0.3rem 0;
+  padding-left: 1.2rem;
+}
+.occ-list li {
+  margin: 0.2rem 0;
+}
+.occ-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+mark {
+  background: #fff3b0;
+  color: inherit;
+  padding: 0 0.1em;
+  border-radius: 2px;
+}
+mark.ambiguous {
+  background: #ffd9c2;
+  outline: 1px dashed var(--warn);
+}
+.preview-out,
+.export-preview,
+.text-table .raw,
+.text-table .exp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.preview-out {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.7rem;
+  background: #f7f8fa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.export-preview {
+  white-space: pre-wrap;
+  max-height: 24rem;
+  overflow: auto;
+  padding: 0.6rem 0.8rem;
+  background: #f7f8fa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.text-table th:first-child {
+  width: 3.5rem;
+}
+.text-table td {
+  width: 50%;
+}
+.warn-note {
+  border-left: 4px solid var(--warn);
+  background: #fff8e6;
+  padding: 0.5rem 0.8rem;
+  margin: 0.4rem 0;
+}
+.export-page h3 {
+  margin: 1rem 0 0.2rem;
+  font-size: 1rem;
+}
+.button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
