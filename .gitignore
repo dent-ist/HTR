@@ -26,3 +26,7 @@ Thumbs.db
 # Models and bundles
 *.mlmodel
 *.htrbundle
+
+# Frontend test output
+frontend/test-results/
+frontend/playwright-report/

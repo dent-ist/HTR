@@ -2,7 +2,11 @@
 UV ?= uv
 RUN = $(UV) run --project backend
 
-.PHONY: setup check test test-kraken fonts lint format serve
+# Node (version pinned in frontend/.nvmrc) is installed at user level under ~/.local; put it ahead of anything
+# inherited from Windows on PATH. Only the *-frontend / dev / e2e targets use it; `make check` does not.
+export PATH := $(HOME)/.local/bin:$(HOME)/.local/node/current/bin:$(PATH)
+
+.PHONY: setup check test test-kraken fonts lint format serve dev setup-frontend dev-frontend test-frontend lint-frontend test-e2e
 
 setup:
 	$(UV) sync --project backend --python 3.11
@@ -34,3 +38,30 @@ format:
 # Bound to loopback only (127.0.0.1).
 serve:
 	cd backend && $(UV) run uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+# ---- frontend (React + TypeScript + Vite, M3) ----
+
+# One-time (dev tooling downloads only): npm packages from the lockfile, plus Chromium for the e2e test.
+setup-frontend:
+	node --version
+	cd frontend && npm ci && npx playwright install chromium
+	bash scripts/setup_chromium_libs.sh
+
+# Vite dev server on http://127.0.0.1:5173 (the only origin the API's CORS allows). API base: VITE_API_BASE_URL.
+dev-frontend:
+	cd frontend && npm run dev
+
+test-frontend:
+	cd frontend && npm test
+
+lint-frontend:
+	cd frontend && npm run lint
+
+# API (8000) and frontend (5173) together; Ctrl+C stops both.
+dev:
+	@trap 'kill 0' INT TERM EXIT; $(MAKE) serve & $(MAKE) dev-frontend & wait
+
+# Opt-in end-to-end test: real backend on a temp data dir (real Kraken segmentation) + Vite + headless Chromium.
+# Slow; not part of `make test` or `make test-frontend`.
+test-e2e:
+	cd frontend && LD_LIBRARY_PATH="$(HOME)/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu:$$LD_LIBRARY_PATH" npm run test:e2e
