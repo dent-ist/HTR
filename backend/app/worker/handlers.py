@@ -30,6 +30,18 @@ class JobContext:
     def progress(self, fraction: float) -> None:
         queue.set_progress(self.conn, self.job["id"], fraction)
 
+    def info(self, info: dict) -> None:
+        """Publish live status (shown as the running job's `result`)."""
+        queue.set_info(self.conn, self.job["id"], info)
+
+    def cancel_requested(self) -> bool:
+        return queue.cancel_requested(self.conn, self.job["id"])
+
+    def check_cancelled(self, result: dict | None = None) -> None:
+        """Cooperative cancellation point: ends the job as cancelled if the user asked for it."""
+        if self.cancel_requested():
+            raise queue.JobCancelled(result)
+
 
 Handler = Callable[[JobContext], dict | None]
 
@@ -80,15 +92,20 @@ def guard_resegment(conn: sqlite3.Connection, page_id: int, force: bool) -> None
         raise Conflict(f"page {page_id} has {n} transcribed line(s); re-segmenting would discard them (use force)")
 
 
-def _not_implemented(name: str) -> Handler:
-    def handler(ctx: JobContext) -> dict | None:
-        raise NotImplementedError(f"'{name}' jobs are not implemented until M4")
+def train_job(ctx: JobContext) -> dict | None:
+    from .ml_jobs import train_model  # imported lazily: pulls in the recognition stack
 
-    return handler
+    return train_model(ctx)
+
+
+def predict_job(ctx: JobContext) -> dict | None:
+    from .ml_jobs import predict_lines
+
+    return predict_lines(ctx)
 
 
 HANDLERS: dict[str, Handler] = {
     "segment": segment_page,
-    "predict": _not_implemented("predict"),
-    "train": _not_implemented("train"),
+    "predict": predict_job,
+    "train": train_job,
 }

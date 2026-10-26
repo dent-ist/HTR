@@ -15,6 +15,7 @@ from .api.routes import router
 from .config import CORS_ORIGINS, Settings
 from .db import connect, migrate
 from .errors import ApiError
+from .services import models as models_svc
 from .worker import queue
 from .worker.runner import Worker
 
@@ -34,6 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         conn = connect(settings.db_path)
         try:
             migrate(conn)
+            models_svc.register_base_models(conn, settings)  # pretrained models downloaded by `make base-model`
             recovered = queue.fail_interrupted(conn)  # jobs left 'running' by a crash will never finish
             if recovered:
                 log.warning("marked %d interrupted job(s) as failed", recovered)

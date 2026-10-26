@@ -48,22 +48,36 @@ def available_fonts() -> list[str]:
     return fonts or [f for f in FALLBACK_FONTS if Path(f).exists()]
 
 
-def _text_line(rng: np.random.Generator, font: ImageFont.FreeTypeFont, max_w: int, ink: tuple) -> Image.Image:
-    """One line of words that fits in max_w, drawn on a transparent strip with a slight random slope."""
+def _text_line_ex(
+    rng: np.random.Generator, font: ImageFont.FreeTypeFont, max_w: int, ink: tuple, vocabulary: list[str] | None = None
+) -> tuple[Image.Image, str, float]:
+    """One line of words that fits in max_w, drawn on a transparent strip with a slight random slope.
+    Returns (strip, text, text width in px); the text starts at x=10 and y=0.4*font size inside the strip."""
+    vocabulary = vocabulary or WORDS
     words: list[str] = []
     probe = ImageDraw.Draw(Image.new("L", (1, 1)))
     target = int(rng.integers(max(3, max_w // 400), max(5, max_w // 150)))
     while len(words) < target + 8:
-        words.append(str(rng.choice(WORDS)))
+        words.append(str(rng.choice(vocabulary)))
         if probe.textlength(" ".join(words), font=font) > max_w * rng.uniform(0.7, 0.98):
             words.pop()
             break
     text = " ".join(words) or "x"
-    w = int(probe.textlength(text, font=font)) + 20
+    text_w = probe.textlength(text, font=font)
+    w = int(text_w) + 20
     size = font.size
     strip = Image.new("RGBA", (w, int(size * 2.2)), (255, 255, 255, 0))
     ImageDraw.Draw(strip).text((10, size * 0.4), text, font=font, fill=ink + (255,))
-    return strip.rotate(float(rng.uniform(-1.2, 1.2)), resample=Image.BICUBIC, expand=True)
+    return strip.rotate(float(rng.uniform(-1.2, 1.2)), resample=Image.BICUBIC, expand=True), text, text_w
+
+
+def _text_line(rng: np.random.Generator, font: ImageFont.FreeTypeFont, max_w: int, ink: tuple) -> Image.Image:
+    return _text_line_ex(rng, font, max_w, ink)[0]
+
+
+def _truth(text: str, kind: str, x: int, y: int, text_w: float, size: int) -> dict:
+    top = y + size * 0.4
+    return {"text": text, "kind": kind, "bbox": [x + 10, round(top), round(x + 10 + text_w), round(top + size * 1.2)]}
 
 
 def render_page(
@@ -77,8 +91,13 @@ def render_page(
     margin_note: bool = True,
     n_lines: int | None = None,
     tight: bool = False,
+    vocabulary: list[str] | None = None,
+    truth: list[dict] | None = None,
 ) -> SyntheticPage:
-    """Render one page. `tight` shrinks line spacing so ascenders/descenders nearly touch."""
+    """Render one page. `tight` shrinks line spacing so ascenders/descenders nearly touch.
+
+    `vocabulary` replaces the built-in word list. If `truth` is a list, one dict per rendered line is appended:
+    {"text", "kind" ("main" | "margin"), "bbox": [x0, y0, x1, y1]} (text box in page pixels, before `skew_deg`)."""
     paper = int(rng.integers(238, 252))
     page = Image.new("RGBA", (width, height), (paper, paper - 2, paper - 8, 255))
     font = ImageFont.truetype(font_path, font_size)
@@ -95,15 +114,21 @@ def render_page(
         if ruled:
             ry = y + int(font_size * 1.35)
             draw.line([(0, ry), (width, ry)], fill=(150, 170, 200, 255), width=2)
-        strip = _text_line(rng, font, text_w, ink)
-        page.alpha_composite(strip, (left + int(rng.integers(0, 25)), y))
+        strip, text, tw = _text_line_ex(rng, font, text_w, ink, vocabulary)
+        x = left + int(rng.integers(0, 25))
+        page.alpha_composite(strip, (x, y))
+        if truth is not None:
+            truth.append(_truth(text, "main", x, y, tw, font_size))
     margin_lines = 0
     if margin_note:
         nfont = ImageFont.truetype(font_path, int(font_size * 0.8))
         ny = top + pitch * int(rng.integers(2, max(3, count // 2)))
         for k in range(2):
-            strip = _text_line(rng, nfont, note_w - 30, ink)
-            page.alpha_composite(strip, (width - note_w - 40, ny + k * int(pitch * 0.9)))
+            strip, text, tw = _text_line_ex(rng, nfont, note_w - 30, ink, vocabulary)
+            nx, nyk = width - note_w - 40, ny + k * int(pitch * 0.9)
+            page.alpha_composite(strip, (nx, nyk))
+            if truth is not None:
+                truth.append(_truth(text, "margin", nx, nyk, tw, nfont.size))
             margin_lines += 1
     arr = np.asarray(page.convert("L"), dtype=np.float64)
     arr += rng.normal(0, 3.0, arr.shape)  # scanner noise

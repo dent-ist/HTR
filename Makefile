@@ -6,7 +6,7 @@ RUN = $(UV) run --project backend
 # inherited from Windows on PATH. Only the *-frontend / dev / e2e targets use it; `make check` does not.
 export PATH := $(HOME)/.local/bin:$(HOME)/.local/node/current/bin:$(PATH)
 
-.PHONY: setup check test test-kraken test-train base-model synthetic-project fonts lint format serve dev setup-frontend dev-frontend test-frontend lint-frontend test-e2e
+.PHONY: setup check test test-kraken test-train base-model synthetic-project synthetic-report fonts lint format serve dev setup-frontend dev-frontend test-frontend lint-frontend test-e2e
 
 setup:
 	$(UV) sync --project backend --python 3.11
@@ -34,9 +34,22 @@ fonts:
 base-model:
 	$(RUN) python scripts/get_base_model.py
 
-# Opt-in: tiny real fine-tune + predict (needs `make base-model`; about a minute).
+# Opt-in: tiny real fine-tune + predict (needs `make base-model` and `make fonts`; well under two minutes).
 test-train:
 	cd backend && $(UV) run pytest -m train
+
+# Dev proof of the train/predict loop on synthetic pages (NOT real handwriting). Needs a throw-away server whose data
+# dir is separate from your real one, see the header of scripts/make_synthetic_project.py:
+#   mkdir -p data/synthetic_project/server/models && ln -s $$PWD/data/models/base data/synthetic_project/server/models/base
+#   HTR_DATA_DIR=$$PWD/data/synthetic_project/server make serve   (own terminal)
+#   make synthetic-project                                     (renders, imports, segments, labels 170 lines)
+#   ... train and predict on the Training page ...
+#   make synthetic-report                                      (CER of the predictions on never-labeled lines)
+synthetic-project:
+	PYTHONPATH=backend:scripts $(RUN) python scripts/make_synthetic_project.py build --pages 30 --label 170
+
+synthetic-report:
+	PYTHONPATH=backend:scripts $(RUN) python scripts/make_synthetic_project.py report
 
 lint:
 	cd backend && $(UV) run ruff check .. && $(UV) run ruff format --check ..

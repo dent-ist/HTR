@@ -128,3 +128,31 @@ def api(client, scan_bytes):
             return client.get(f"/pages/{page['id']}").json()
 
     return Api()
+
+
+# ---- M4: training / prediction with fake engines ------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_ml(monkeypatch, settings):
+    """Replace the Kraken recognizer and trainer in the job handlers by fast fakes (tests/ml_fakes.py) and put a
+    fake pretrained base model on disk, as `make base-model` would."""
+    import json
+
+    from app.worker import ml_jobs
+    from tests import ml_fakes
+
+    ml_fakes.FakeRecognizer.instances.clear()
+    ml_fakes.FakeRecognizer.on_predict = None
+    ml_fakes.FakeTrainer.reset()
+    monkeypatch.setattr(
+        ml_jobs, "load_recognizer", lambda engine, path, device="auto", batch_size=4: ml_fakes.FakeRecognizer(path)
+    )
+    monkeypatch.setattr(ml_jobs, "make_trainer", lambda engine: ml_fakes.FakeTrainer())
+    base = settings.data_dir / "models" / "base" / "test-base"
+    base.mkdir(parents=True)
+    (base / "base.mlmodel").write_bytes(b"fake base model")
+    (base / "BASE_MODEL.json").write_text(
+        json.dumps({"name": "test-base", "doi": "10.0/test", "license": "Apache-2.0", "file": "base.mlmodel"})
+    )
+    return ml_fakes

@@ -3,7 +3,7 @@ import time
 
 from fastapi.testclient import TestClient
 
-from app.db import connect, migrate
+from app.db import LATEST_VERSION, connect, migrate
 from app.main import create_app
 from app.worker import queue
 from app.worker.runner import Worker
@@ -75,7 +75,7 @@ def test_fail_interrupted_only_touches_running(settings):
 # ---- worker ------------------------------------------------------------------------------------------------------
 
 
-def test_stub_handlers_fail_with_clear_message(settings):
+def test_train_and_predict_jobs_fail_with_clear_messages_without_a_model(settings):
     conn = make_db(settings)
     w = Worker(settings)
     for t in ("predict", "train"):
@@ -83,7 +83,7 @@ def test_stub_handlers_fail_with_clear_message(settings):
         assert w.run_once(conn) is True
         job = queue.get_job(conn, jid)
         assert job["status"] == "failed"
-        assert job["error"] == f"'{t}' jobs are not implemented until M4"
+        assert "make base-model" in job["error"]
     assert w.run_once(conn) is False
 
 
@@ -227,8 +227,8 @@ def test_crash_recovery_on_startup(settings):
     with TestClient(create_app(settings)) as c:
         job = c.get(f"/jobs/{crashed}").json()
         assert job["status"] == "failed" and "interrupted" in job["error"] and job["finished_at"]
-        # the queued job survived and is picked up by the new worker (its stub handler then fails it)
-        assert "M4" in wait_job(c, waiting)["error"]
+        # the queued job survived and is picked up by the new worker (no model exists here, so it fails clearly)
+        assert "no recognition model" in wait_job(c, waiting)["error"]
 
 
 def test_app_startup_migrates_a_fresh_database(settings):
@@ -239,4 +239,4 @@ def test_app_startup_migrates_a_fresh_database(settings):
         worker = c.app.state.worker
     assert settings.db_path.exists() and not worker.running  # lifespan shutdown stopped the worker
     conn = connect(settings.db_path)
-    assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 1
+    assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == LATEST_VERSION

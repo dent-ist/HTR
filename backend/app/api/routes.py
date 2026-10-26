@@ -14,8 +14,10 @@ from PIL import Image
 from ..config import Settings
 from ..errors import Conflict, NotFound
 from ..services import lines as lines_svc
+from ..services import models as models_svc
 from ..services import pages as pages_svc
 from ..services import repair as repair_svc
+from ..services import training as training_svc
 from ..worker import queue
 from .deps import get_conn, get_settings
 from .schemas import (
@@ -24,10 +26,12 @@ from .schemas import (
     LineCreate,
     LinePatch,
     MergeRequest,
+    PredictRequest,
     ReorderRequest,
     RestoreRequest,
     SegmentRequest,
     SplitRequest,
+    TrainRequest,
 )
 
 router = APIRouter()
@@ -197,5 +201,73 @@ def get_job(job_id: int, conn: Conn):
 
 @router.post("/jobs/{job_id}/cancel", tags=["jobs"])
 def cancel_job(job_id: int, conn: Conn):
-    """Cancel a queued job (409 if it already started)."""
+    """Cancel a queued job at once, or ask a running train/predict job to stop (it ends as `cancelled` at its next
+    checkpoint; `cancel_requested` is true meanwhile). 409 for a running segmentation or a finished job."""
     return queue.cancel(conn, job_id)
+
+
+# ---- training, prediction, models ------------------------------------------------------------------------------
+
+
+def _reject_if_active(conn: sqlite3.Connection, job_type: str) -> None:
+    for status in ("queued", "running"):
+        for j in queue.list_jobs(conn, status=status, job_type=job_type, limit=1):
+            raise Conflict(f"a {job_type} job is already {j['status']} (job {j['id']})")
+
+
+@router.post("/jobs/train", status_code=202, tags=["training"])
+def start_training(request: Request, conn: Conn, settings: Cfg, body: TrainRequest | None = None):
+    """Enqueue a fine-tune job. 422 when there is nothing to train on or no start model exists; a short ground
+    truth count is only a `warnings` entry in the response, never a refusal."""
+    body = body or TrainRequest()
+    models_svc.resolve_model(conn, settings, body.base_model_id)  # 404 / 422 / 409 now rather than in the job
+    warnings = training_svc.check_can_train(conn)
+    _reject_if_active(conn, "train")
+    payload = body.model_dump(exclude_none=True)
+    payload["warnings"] = warnings
+    job = queue.enqueue(conn, "train", payload)
+    request.app.state.worker.wake()
+    return {**job, "warnings": warnings}
+
+
+@router.post("/jobs/predict", status_code=202, tags=["training"])
+def start_prediction(request: Request, conn: Conn, settings: Cfg, body: PredictRequest | None = None):
+    """Enqueue a prediction job over the lines that are not ground truth, not ignored and have no manual text."""
+    body = body or PredictRequest()
+    row = models_svc.resolve_model(conn, settings, body.model_id)
+    for page_id in body.page_ids or []:
+        pages_svc.get_page_row(conn, page_id)
+    _reject_if_active(conn, "predict")
+    warnings = []
+    if row["kind"] == "base":
+        warnings.append(
+            "This is the pretrained base model, not yet adapted to your handwriting; predictions will be rough. "
+            "Fine-tune on your own ground-truth lines first for better results."
+        )
+    job = queue.enqueue(conn, "predict", body.model_dump(exclude_none=True))
+    request.app.state.worker.wake()
+    return {**job, "warnings": warnings}
+
+
+@router.get("/models", tags=["models"])
+def list_models(conn: Conn, settings: Cfg):
+    models_svc.ensure_registry(conn, settings)
+    return models_svc.list_models(conn)
+
+
+@router.get("/models/{model_id}", tags=["models"])
+def get_model(model_id: int, conn: Conn):
+    return models_svc.get_model(conn, model_id)
+
+
+@router.post("/models/{model_id}/activate", tags=["models"])
+def activate_model(model_id: int, conn: Conn):
+    """Make this the model predict and the next fine-tune use by default."""
+    return models_svc.activate(conn, model_id)
+
+
+@router.get("/training/summary", tags=["training"])
+def training_summary(conn: Conn, settings: Cfg):
+    """Ground-truth counts against the recommended minimums, with non-blocking warnings."""
+    models_svc.ensure_registry(conn, settings)
+    return training_svc.summary(conn)

@@ -141,3 +141,26 @@ class RestoreRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lines: list[RestoreLine] = Field(max_length=2000)
     force: bool = False
+
+
+class TrainRequest(BaseModel):
+    """Fine-tune job options. Every field is optional; defaults are sized for a 4 GB GPU (see README)."""
+
+    model_config = ConfigDict(extra="forbid")
+    epochs: int | None = Field(default=None, ge=1, le=500, description="maximum epochs (early stopping may end sooner)")
+    batch_size: int | None = Field(
+        default=None, ge=1, le=256, description="lines per step; lower it if the GPU runs out of memory"
+    )
+    learning_rate: float | None = Field(default=None, gt=0, le=0.1, allow_inf_nan=False)
+    base_model_id: int | None = Field(default=None, description="model to start from; default: the active model")
+    device: Literal["auto", "cpu", "cuda:0"] | None = None
+    patience: int | None = Field(default=None, ge=1, le=100, description="early stopping: epochs without improvement")
+    augment: bool | None = None
+
+
+class PredictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model_id: int | None = Field(default=None, description="default: the active model")
+    page_ids: list[int] | None = Field(default=None, max_length=5000, description="limit to these pages")
+    batch_size: int | None = Field(default=None, ge=1, le=256)
+    device: Literal["auto", "cpu", "cuda:0"] | None = None
