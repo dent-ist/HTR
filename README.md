@@ -9,7 +9,11 @@ Full spec: [docs/implementation-plan.md](docs/implementation-plan.md).
 backend/     uv project (Python 3.11): FastAPI app, tests, pyproject.toml + uv.lock
 frontend/    placeholder (React, from M3)
 scripts/     check_env.py, inspect_images.py, htr.py (import/segment), review_sheet.py, make_synthetic_pages.py
-backend/app/pipeline/   measure, preprocess, segment, pagexml, overlay, workflow, review
+backend/app/pipeline/   measure, preprocess, segment, pagexml, overlay, workflow, review (M1 pipeline)
+backend/app/db/         SQLite connection + versioned migrations
+backend/app/services/   pages (import), lines (CRUD), sync (DB <-> PAGE-XML)
+backend/app/worker/     SQLite job queue, handlers, in-process worker thread
+backend/app/api/        FastAPI routes and request schemas
 data/        gitignored: scans, PAGE-XML, models, DB (never committed)
 docs/
 ```
@@ -44,7 +48,7 @@ CUDA operation. Keep training batch sizes small enough for 4 GB.
 | `make fonts` | Optional one-time dev download of three OFL script fonts into `data/fonts/` for nicer synthetic test pages |
 | `make lint` | ruff check + ruff format --check |
 | `make format` | ruff autofix + format |
-| `make serve` | Stub API on `http://127.0.0.1:8000` (loopback only); `GET /health` |
+| `make serve` | The API on `http://127.0.0.1:8000` (loopback only); docs at `/docs`. See "M2: backend API" below |
 
 ## Inspecting a folder of scans
 
@@ -124,3 +128,112 @@ There are no real scans in the repo. `scripts/make_synthetic_pages.py OUT_DIR -n
 (script fonts from `data/fonts/` if you ran `make fonts`, otherwise DejaVu) with varied size, skew, ruled/unruled
 paper and a margin note, plus a `truth.json` with the number of lines rendered. Results on synthetic pages say
 nothing about real handwriting; the go/no-go decision requires your real scans.
+
+## M2: backend API, database, job queue
+
+### Running the server
+
+```
+make serve        # uvicorn app.main:app --host 127.0.0.1 --port 8000   (loopback only)
+```
+
+Open `http://127.0.0.1:8000/docs` for the interactive API. A one-page endpoint summary is in
+[docs/api.md](docs/api.md). On startup the app creates `data/` if needed, migrates the database, marks jobs left
+`running` by a crash as failed, and starts the worker thread; on shutdown it stops the worker (a job in progress is
+allowed to finish, up to 30 s).
+
+Environment variables (all optional): `HTR_DATA_DIR` (default `<repo>/data`), `HTR_DB_PATH` (default
+`<data>/htr.db`), `HTR_MAX_UPLOAD_MB` (default 100), `HTR_DEVICE` (`auto`, `cpu` or `cuda:0`, default `auto`).
+The server only accepts browser calls from `http://localhost:5173` and `http://127.0.0.1:5173` (Vite dev); there is no
+wildcard and no authentication (single user, loopback).
+
+Quick try (second terminal):
+
+```
+curl -s -X POST localhost:8000/documents -H 'content-type: application/json' -d '{"name":"notes"}'
+curl -s -X POST localhost:8000/pages -F document_id=1 -F file=@data/scans/page1.png
+curl -s -X POST localhost:8000/pages/1/segment        # returns a job
+curl -s localhost:8000/jobs/1                         # poll until "succeeded"
+curl -s localhost:8000/pages/1                        # the page with its lines
+```
+
+### Endpoints
+
+| | |
+|---|---|
+| `POST /documents`, `GET /documents` | create / list documents |
+| `POST /pages` | multipart upload (`file`, `document_id`); PNG/JPEG/TIFF, validated; identical content is not imported twice |
+| `GET /pages`, `GET /pages/{id}` | status (`unsegmented`, `segmented`, `partially_transcribed`, `done`), line and ground-truth counts; detail adds lines |
+| `GET /pages/{id}/original`, `GET /pages/{id}/working` | the untouched original / the working copy |
+| `POST /pages/{id}/segment` | enqueue a segmentation job |
+| `PATCH /lines/{id}`, `DELETE /lines/{id}`, `POST /pages/{id}/lines` | line CRUD (text, polygon, baseline, ignored, ground truth, reorder via `index`) |
+| `GET /lines/{id}/crop.png` | line crop (polygon bounding box of the working copy) |
+| `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/cancel` | job status, progress, errors; cancel queued jobs |
+
+Details and rules: [docs/api.md](docs/api.md). Not in M2: line split/merge (M3), predict/train endpoints (M4;
+those job types exist as stubs that fail with "not implemented until M4"), abbreviations endpoints, export.
+
+### Data layout
+
+```
+data/
+  htr.db                 SQLite (WAL mode; htr.db-wal / -shm beside it while running)
+  originals/<stem>_<hash8>.<ext>   uploaded files, byte-identical, never modified
+  working/<stem>_<hash8>.png       normalized / deskewed / maybe rescaled working copy (M1 pipeline)
+  pagexml/<stem>_<hash8>.xml       PAGE-XML per segmented page, coordinates in working-copy pixels
+  tmp/                   uploads in flight
+```
+
+The M1 CLI (`scripts/htr.py`) uses the same folders but its own `manifest.json`; the API does not read that manifest,
+so pages imported with the CLI do not appear in the API (re-upload them).
+
+### Database
+
+Plain stdlib `sqlite3` with a small versioned migration runner (`backend/app/db/migrations.py`): for one user and six
+tables an ORM would add more than it saves. Tables follow the plan: `documents`, `pages`, `lines`, `models`, `jobs`,
+`abbreviations`, plus `schema_version`. Foreign keys are on, the journal is WAL, each request / the worker has its own
+connection, writes are explicit `BEGIN IMMEDIATE` transactions. Notable columns beyond the plan:
+
+- `pages`: `width`/`height` are the **working copy** size (all coordinates live there); `image_path` is the original;
+  `original_filename`, `sha256` (unique, dedupes uploads), `original_width/height`, `dpi_x/y`, `line_height_px`,
+  `scale`, `skew_deg`, `deskewed`, `warnings` (json import warnings), `preprocess` (json), `imported_at`,
+  `segmented_at`. `status` is stored and recomputed in every transaction that changes lines.
+- `lines`: `"index"` (quoted: reserved word) is contiguous per page and maintained by the service layer;
+  `text_source` is NULL while the line has no text.
+- `jobs`: plus `result` (json), `started_at`, `finished_at`.
+
+To change the schema append a migration to `MIGRATIONS`; never edit an applied one. A database from a newer app
+version is refused.
+
+### PAGE-XML sync
+
+`data/pagexml/<page>.xml` is rewritten from the database after every line mutation and every segmentation, inside the
+same operation as the DB commit: the transaction opens, rows change, the XML is written to `<page>.xml.tmp` and renamed
+over the old file (atomic), then the transaction commits. If any step fails the transaction is rolled back and the
+previous XML stays. (If COMMIT itself fails after the rename, the XML is regenerated from the unchanged database.)
+
+State is stored in the file so that it is complete on its own: text in `TextEquiv/Unicode` (prediction confidence in
+`TextEquiv@conf`), reading order in `custom="readingOrder {index:N;}"`, and the flags PAGE-XML has no field for in an
+`htr` block of the same `custom` attribute:
+
+```
+custom="readingOrder {index:3;} htr {ground_truth:true; ignored:true; text_source:manual;}"
+```
+
+`ground_truth` / `ignored` are written only when true. `app.services.sync.rebuild_lines_from_xml(conn, settings,
+page_id, xml_path=None)` is the import path: it replaces a page's DB lines from a PAGE-XML file (sizes must match the
+working copy) and restores text, source, confidence, ground-truth and ignored flags; the round trip DB -> XML -> DB is
+covered by tests. Training (M4) must skip `ignored` lines.
+
+### Job queue
+
+`jobs` rows are the queue. One worker thread polls (and is woken on enqueue), claims the oldest `queued` job, runs its
+handler and records `succeeded` / `failed` (with the error message). One job at a time, because the GPU is shared.
+Handlers: `segment` (Kraken `blla` via the M1 `segment.segment_image`; replaces the page's lines; refuses to discard
+manually transcribed lines unless `force`), `predict` and `train` (stubs). Segmentation points are clamped to the page.
+
+### Tests
+
+`make test` runs the API tests with Kraken mocked (fast, no GPU). `make test-kraken` runs the real-model tests,
+including `tests/test_kraken_api.py`: import a synthetic page through the API, segment it with real Kraken via the
+job queue, and read the lines back (run with `-s` to see the printed lines).
