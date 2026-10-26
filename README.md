@@ -401,6 +401,10 @@ models/<id>.mlmodel      fine-tuned models
 models/base/<name>/...   the pretrained base models that model rows point at (model file + BASE_MODEL.json)
 ```
 
+The database already stores every file path relative to the data directory (`originals/...`, `working/...`,
+`pagexml/...`, `models/...`), so nothing has to be rewritten on import and a bundle restores into any data directory; the
+import still refuses any path that is absolute or leaves those folders.
+
 Not included: overlays, import reports, `training/` run folders (regenerable), temporary files. The database part carries
 documents, pages, lines (text, flags, geometry, order), `line_splits` and `model_lines`, models and the active flag, jobs
 (history), review events and abbreviations.
@@ -424,7 +428,8 @@ documents, pages, lines (text, flags, geometry, order), `line_splits` and `model
 refused with **409** while a segment, train or predict job is queued or running (the message names the job). Otherwise the
 zip is streamed in chunks (never built in memory); the browser saves the stream straight to a file. A model or base-model
 file that is missing on disk is listed under `missing_files` instead of failing; a missing scan or working copy refuses
-the export. The CLI writes `<file>.part` and renames it, and never overwrites an existing file.
+the export. The CLI writes `<file>.part` and renames it, and never overwrites an existing file; it reads through the SQLite backup
+API, so it can run while the server is up.
 
 **Import** (`POST /bundle/import` multipart `file`, **Import project bundle** on the Export page,
 `python scripts/htr.py bundle import <file>`):
