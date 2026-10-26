@@ -3,7 +3,7 @@ import { chartRounds, modelLabel, pct, yAxis } from "./format";
 
 const W = 600;
 const H = 240;
-const M = { left: 52, right: 16, top: 16, bottom: 44 };
+const M = { left: 52, right: 36, top: 16, bottom: 44 };
 
 /**
  * CER by training round, as inline SVG (no chart library). Two series, told apart by line style and marker shape as

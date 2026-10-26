@@ -50,6 +50,7 @@ CUDA operation. Keep training batch sizes small enough for 4 GB.
 | `make fonts` | Optional one-time dev download of three OFL script fonts into `data/fonts/` for nicer synthetic test pages |
 | `make base-model` | One-time download of the pretrained recognition model into `data/models/base/` (see "M4"); the app itself never goes online |
 | `make test-train` | Opt-in tiny real fine-tune + predict with Kraken on the GPU (marker `train`; needs `make base-model` and `make fonts`; about 15 s) |
+| `make synthetic-rounds` | Dev simulation of the M5 loop (rounds + scripted reviewer) on synthetic pages, see "M5" |
 | `make synthetic-project` / `make synthetic-report` | Dev proof of the train/predict loop on synthetic pages (see "M4") |
 | `make lint` | ruff check + ruff format --check |
 | `make format` | ruff autofix + format |
@@ -270,6 +271,76 @@ the export, the job lifecycle with fake engines (progress, cancellation, out-of-
 ground truth, API errors, registry) and the recognizer's batching and out-of-memory logic. `make test-train` runs the
 real thing on a handful of synthetic lines (train + predict through the API, about 15 s on the GPU). `make test-frontend`
 and `make test-e2e` include the Training page.
+
+## M5: active learning loop and review queue
+
+The loop: train, **predict every line you have not done**, **review** the predictions least-certain first, corrected
+lines become ground truth, train again. Nothing here blocks you: every suggestion is advice.
+
+**Predictions in the editor.** A line that holds an unreviewed prediction shows its confidence as a number, a word and a
+mark (`98% high`, `75% medium`, `40% low`; bands at 90% and 70%) in the line list and in the dock, and its outline on the
+canvas changes colour *and* pattern (solid, dashed, dotted); a legend sits under the line list. When you select such a
+line the text box is prefilled with the prediction and labelled "Predicted text, not yet checked". **Enter accepts it**
+(ground truth, next line); edit and press Enter to correct it; **Esc restores the prediction**. A prefilled prediction is
+not an unsaved edit: the leave-page guard stays quiet until you change the text.
+
+**Review page** (`#/review`, buttons in the library and editor headers): one line at a time by ascending confidence, with
+a large crop, the editable prediction, its confidence and the model that made it, lines left in the queue, an "Open page in
+editor" link and this session's counts. Keyboard only:
+
+| Key | Action |
+|---|---|
+| Enter | accept the prediction as is (or save your correction) and load the next line |
+| Tab | skip (the line stays out of this session's queue until "Reset skipped") |
+| Ctrl+I | ignore the line (recorded as such) |
+| Esc | restore the prediction |
+
+**Correction effort.** Every prediction remembers which model made it. When a predicted line becomes ground truth the
+server records, in the same transaction as the change, whether it was *accepted* unchanged, *corrected* (with the edit
+distance in characters) or *ignored* (`review_events`, `GET /review/stats`). The Training page charts, per round (= per
+model whose predictions were reviewed): the share accepted unchanged and the mean edits per reviewed line, next to the CER
+chart, with a table of the numbers. A suggestion banner ("Retraining suggested") appears in the library, the review page
+and the Training page when there are at least 50 new ground-truth lines since the last round (or at least 100 in total
+before the first one). **Run round** on the Training page trains and then predicts all non-ground-truth lines with the new
+model (`POST /jobs/round`; both steps show progress and can be cancelled; a failed or cancelled training step ends the
+round and says so; a model that is worse than its start model is kept but not activated, so no prediction is started).
+Re-predicting overwrites only older predictions, never ground truth or text you typed.
+
+### Simulated loop on synthetic data (development only; NOT real handwriting, NOT a human)
+
+`make synthetic-rounds` (`scripts/make_synthetic_rounds.py`; setup in its docstring) drives the real API on the real GPU:
+36 synthetic pages (real segmentation; 417 lines matched to their true text), 60 matched lines held back and never
+labeled or reviewed (a fixed evaluation pool), 40 lines labeled to start, then 3 rounds of {`/jobs/round` (10 epochs),
+a scripted reviewer that takes the next 50 lines from `/review/next` in the order the app serves them and accepts a line
+whose prediction equals the true text or corrects it}. Seeds are fixed and nothing was tuned between runs; this is the
+single run reported.
+
+| Round | GT lines at training | Held-out CER (lines) | Held-out WER | Fixed-pool CER / WER (60 lines) | Accepted unchanged | Edits / reviewed line | Edits / char | Errors in the first 20 queue lines: by confidence vs random order |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 40 | 12.9% (3; start model 34.7%) | 37.5% | 15.9% / 48.9% | 0 of 50 | 11.74 | 0.280 | 20/20 vs 17.9/20 (90% of the queue is wrong) |
+| 2 | 90 | 7.3% (6; start 20.5%) | 26.7% | 6.5% / 23.9% | 0 of 50 | 4.68 | 0.096 | 20/20 vs 14.2/20 (72%) |
+| 3 | 140 | 4.8% (15; start 10.4%) | 20.0% | 2.6% / 11.9% | 9 of 50 (18%) | 1.60 | 0.037 | 18/20 vs 9.4/20 (47%) |
+
+Training took 35, 70 and 102 s (a whole round 45, 79 and 112 s). What this shows, and what it does not:
+
+- CER and review effort both fall from round to round in this run. The **fixed-pool CER** (the same 60 never-labeled
+  lines each time) is the cleanest comparison: 15.9% to 6.5% to 2.6%. The held-out CER also falls, but it rests on 3, 6 and
+  15 lines and the held-out set *grows* as ground truth grows, so those numbers are noisy and not strictly like for like.
+- "Edits per reviewed line" is confounded: the reviewer always takes the *least certain* lines, which are the hardest
+  ones, so it understates the improvement on the average line. The accepted-unchanged share stays at 0% for two rounds
+  because the least-certain 50 lines were all wrong; it only rises once the model is good (18% in round 3).
+- Low-confidence-first finds errors faster than random order, increasingly so as the model improves: all 20 of the first
+  20 queue lines needed a correction in rounds 1 and 2 (random order would meet 17.9 and 14.2 on average), 18 of 20 in
+  round 3 (random: 9.4). In round 1 almost everything was wrong, so ordering barely mattered.
+- Tests: `make test` covers queue order, exclude, review events (accepted / corrected / ignored, one per prediction,
+  rolled back with a failed save), the stats, chained rounds (success, failed step, cancel), the retrain thresholds and
+  never overwriting ground truth or typed text; `make test-frontend` the editor prefill/accept/Esc semantics and guard,
+  the review page keyboard flow, the confidence indicator and both charts; `make test-e2e` includes
+  `zz-review.spec.ts` (needs `make base-model`): accept a prediction in the editor, then a 3-line review session
+  (accept, correct, ignore), verified through the API.
+- This is synthetic text from three fonts and about 370 word forms, with a reviewer who never errs. It proves the
+  machinery works end to end (rounds, queue order, events, statistics, charts). It does **not** show that review effort
+  will fall for a real writer; that needs real rounds with your own lines.
 
 ## Inspecting a folder of scans
 

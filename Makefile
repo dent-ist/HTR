@@ -6,7 +6,7 @@ RUN = $(UV) run --project backend
 # inherited from Windows on PATH. Only the *-frontend / dev / e2e targets use it; `make check` does not.
 export PATH := $(HOME)/.local/bin:$(HOME)/.local/node/current/bin:$(PATH)
 
-.PHONY: setup check test test-kraken test-train base-model synthetic-project synthetic-report fonts lint format serve dev setup-frontend dev-frontend test-frontend lint-frontend test-e2e
+.PHONY: setup check test test-kraken test-train base-model synthetic-project synthetic-report synthetic-rounds fonts lint format serve dev setup-frontend dev-frontend test-frontend lint-frontend test-e2e
 
 setup:
 	$(UV) sync --project backend --python 3.11
@@ -47,6 +47,11 @@ test-train:
 #   make synthetic-report                                      (CER of the predictions on never-labeled lines)
 synthetic-project:
 	PYTHONPATH=backend:scripts $(RUN) python scripts/make_synthetic_project.py build --pages 30 --label 170
+
+# Dev proof of the active-learning loop (rounds of train + predict + simulated review) on synthetic pages through the
+# API and the real GPU; needs a throw-away server like synthetic-project (see scripts/make_synthetic_rounds.py).
+synthetic-rounds:
+	PYTHONPATH=backend:scripts $(RUN) python scripts/make_synthetic_rounds.py
 
 synthetic-report:
 	PYTHONPATH=backend:scripts $(RUN) python scripts/make_synthetic_project.py report

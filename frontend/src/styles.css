@@ -731,12 +731,25 @@ kbd {
   padding: 0.5rem;
   overflow-x: auto;
 }
+.review-card .review-crop {
+  max-height: none;
+}
 .review-card .review-crop img {
   display: block;
-  max-width: none;
+  width: 100%;
   height: auto;
-  min-height: 90px;
-  max-height: 260px;
+  max-width: none;
+  max-height: 240px;
+  min-height: 80px;
+  object-fit: contain;
+  object-position: left center;
+}
+.review-card .pred-label {
+  display: block;
+  margin: 0.8rem 0 0.35rem;
+}
+.review-card .hint {
+  margin-top: 0.5rem;
 }
 .review-card .line-input {
   width: 100%;

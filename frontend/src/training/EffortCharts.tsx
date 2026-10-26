@@ -1,9 +1,9 @@
 import type { ReviewStats } from "../api/types";
 import { pct } from "./format";
 
-const W = 600;
-const H = 200;
-const M = { left: 52, right: 16, top: 16, bottom: 40 };
+const W = 420;
+const H = 220;
+const M = { left: 44, right: 34, top: 18, bottom: 40 };
 
 /** A "nice" axis maximum and ticks for values from 0 up to `max`. */
 export function niceAxis(max: number, floor: number): { max: number; ticks: number[] } {
