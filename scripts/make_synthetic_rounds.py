@@ -187,7 +187,8 @@ def main(argv: list[str] | None = None) -> int:
     print("\nround | GT lines | held-out CER (n) | held-out WER | fixed-pool CER / WER")
     for x in results:
         print(
-            f"{x['round']:>5} | {x['ground_truth_lines_at_training']:>8} | {x['heldout_cer']:.3f} ({x['held_out_lines']}) "
+            f"{x['round']:>5} | {x['ground_truth_lines_at_training']:>8} "
+            f"| {x['heldout_cer']:.3f} ({x['held_out_lines']}) "
             f"| {x['heldout_wer']:.3f} | {x['fixed_pool_cer']:.3f} / {x['fixed_pool_wer']:.3f}"
         )
     print("\nround | accepted unchanged | edits/line | edits/char | errors in first 20: confidence vs random")
