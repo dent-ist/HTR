@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import shutil
 import sqlite3
 import zipfile
@@ -66,8 +67,9 @@ def file_dump(settings: Settings) -> dict[str, str]:
     out = {}
     for d in FILE_DIRS:
         root = settings.data_dir / d
-        for p in sorted(root.rglob("*")) if root.is_dir() else []:
-            if p.is_file():
+        for dirpath, _dirs, names in os.walk(root, followlinks=True):  # models/base may be a symlink
+            for n in names:
+                p = Path(dirpath) / n
                 out[p.relative_to(settings.data_dir).as_posix()] = sha(p)
     return out
 

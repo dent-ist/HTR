@@ -248,7 +248,7 @@ def test_import_into_a_non_empty_project_is_refused_and_changes_nothing(golden, 
     before = H.all_files(client.app.state.settings), H.db_dump(client.app.state.settings)
     r = H.import_via_api(client, golden.bundle)
     assert r.status_code == 409
-    assert "not empty" in r.json()["detail"] and "1 documents" in r.json()["detail"]
+    assert "not empty" in r.json()["detail"] and "1 document," in r.json()["detail"]
     assert (H.all_files(client.app.state.settings), H.db_dump(client.app.state.settings)) == before
     assert client.post("/documents", json={"name": "still works"}).status_code == 201
 
@@ -257,7 +257,7 @@ def test_a_single_abbreviation_also_makes_the_project_non_empty(golden, fresh):
     client, _ = fresh
     client.post("/abbreviations", json={"written": "pt", "expansion": "patient"})
     r = H.import_via_api(client, golden.bundle)
-    assert r.status_code == 409 and "abbreviations" in r.json()["detail"]
+    assert r.status_code == 409 and "1 abbreviation)" in r.json()["detail"]
 
 
 def test_base_model_rows_created_at_startup_do_not_count(golden, tmp_path, fake_ml):

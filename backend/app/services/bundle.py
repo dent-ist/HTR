@@ -60,15 +60,15 @@ ACTIVE_JOBS_MESSAGE = (
 # Tables whose row counts are recorded in the manifest and checked again on import.
 COUNTED_TABLES = ("documents", "pages", "lines", "models", "abbreviations", "review_events", "jobs", "model_lines")
 # Anything in these tables means the project is not empty (base-model rows registered at startup do not count).
-EMPTY_CHECKS = {
-    "documents": "SELECT COUNT(*) FROM documents",
-    "pages": "SELECT COUNT(*) FROM pages",
-    "lines": "SELECT COUNT(*) FROM lines",
-    "fine-tuned models": "SELECT COUNT(*) FROM models WHERE kind <> 'base'",
-    "abbreviations": "SELECT COUNT(*) FROM abbreviations",
-    "review events": "SELECT COUNT(*) FROM review_events",
-    "jobs": "SELECT COUNT(*) FROM jobs",
-}
+EMPTY_CHECKS = [
+    ("document", "documents", "SELECT COUNT(*) FROM documents"),
+    ("page", "pages", "SELECT COUNT(*) FROM pages"),
+    ("line", "lines", "SELECT COUNT(*) FROM lines"),
+    ("fine-tuned model", "fine-tuned models", "SELECT COUNT(*) FROM models WHERE kind <> 'base'"),
+    ("abbreviation", "abbreviations", "SELECT COUNT(*) FROM abbreviations"),
+    ("review event", "review events", "SELECT COUNT(*) FROM review_events"),
+    ("job", "jobs", "SELECT COUNT(*) FROM jobs"),
+]
 
 
 class BundleInvalid(Invalid):
@@ -112,10 +112,10 @@ def require_no_active_jobs(conn: sqlite3.Connection) -> None:
 def non_empty_parts(conn: sqlite3.Connection) -> list[str]:
     """What makes the project non-empty, e.g. ['3 documents', '10 pages']; empty list when it is empty."""
     found = []
-    for label, sql in EMPTY_CHECKS.items():
+    for singular, plural, sql in EMPTY_CHECKS:
         n = conn.execute(sql).fetchone()[0]
         if n:
-            found.append(f"{n} {label}")
+            found.append(f"{n} {singular if n == 1 else plural}")
     return found
 
 
