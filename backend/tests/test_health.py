@@ -74,6 +74,26 @@ def test_gpu_without_kernels_for_its_architecture_is_flagged(settings):
     assert c["status"] == "warn" and "sm_61" in c["message"] and "12.6" in c["hint"]
 
 
+@pytest.mark.parametrize(
+    ("capability", "arch_list", "expected"),
+    [
+        # a GTX 1050 Ti on the cu126 wheels
+        ("sm_61", ["sm_50", "sm_60", "sm_70", "sm_75", "sm_80", "sm_86", "sm_90"], True),
+        ("sm_61", ["sm_61"], True),
+        ("sm_75", ["sm_70"], True),  # a 7.0 binary runs on 7.5
+        ("sm_61", ["sm_70", "sm_75"], False),  # newer-only builds dropped Pascal
+        ("sm_61", ["sm_50"], False),  # a different major version does not run
+        ("sm_86", ["sm_80", "compute_80"], True),
+        ("sm_61", ["compute_50"], True),  # PTX runs on newer GPUs
+        ("sm_61", ["compute_70"], False),
+        ("sm_100", ["sm_90"], False),
+        ("weird", [], True),  # unknown capability format: no false alarm
+    ],
+)
+def test_architecture_compatibility_rule(capability, arch_list, expected):
+    assert health.arch_supported(capability, arch_list) is expected
+
+
 def test_a_broken_torch_does_not_break_the_health_page(settings, monkeypatch):
     import builtins
 

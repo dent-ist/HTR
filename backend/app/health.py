@@ -25,6 +25,33 @@ from .services import models as models_svc
 
 log = logging.getLogger(__name__)
 
+
+def _version(arch: str) -> tuple[int, int] | None:
+    digits = arch.split("_", 1)[-1]
+    if not digits.isdigit() or len(digits) < 2:
+        return None
+    return int(digits[:-1]), int(digits[-1])
+
+
+def arch_supported(capability: str, arch_list: list[str]) -> bool:
+    """Can this PyTorch build run on a GPU of the given compute capability (`sm_61`)? A binary built for `sm_XY` runs
+    on any GPU with the same major version and a minor version >= Y (so the CUDA 12.6 wheels, which list sm_60 but not
+    sm_61, work on a GTX 1050 Ti; `make check` proves it with a real calculation); PTX (`compute_XY`) runs on any
+    GPU of that capability or newer."""
+    cap = _version(capability)
+    if cap is None:
+        return True  # unknown format: do not raise a false alarm
+    for arch in arch_list:
+        v = _version(arch)
+        if v is None:
+            continue
+        if arch.startswith("sm_") and v[0] == cap[0] and v[1] <= cap[1]:
+            return True
+        if arch.startswith("compute_") and v <= cap:
+            return True
+    return False
+
+
 _GPU_LOCK = threading.Lock()
 _GPU_CACHE: dict[str, Any] | None = None
 
@@ -49,7 +76,7 @@ def probe_gpu(refresh: bool = False) -> dict[str, Any]:
                     name=props.name,
                     memory_mb=int(props.total_memory / 1024 / 1024),
                     capability=capability,
-                    arch_supported=capability in torch.cuda.get_arch_list(),
+                    arch_supported=arch_supported(capability, list(torch.cuda.get_arch_list())),
                 )
         except Exception as e:  # noqa: BLE001  a broken torch install must not break the health page
             info["error"] = type(e).__name__
