@@ -16,6 +16,7 @@ from . import health as health_checks
 from .api.abbreviations_api import router as abbreviations_router
 from .api.export_api import router as export_router
 from .api.routes import router
+from .api.suggestions_api import router as suggestions_router
 from .config import APP_VERSION, CORS_ORIGINS, Settings
 from .db import connect, migrate
 from .errors import ApiError
@@ -128,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             conn.close()
 
     app.include_router(router)
+    app.include_router(suggestions_router)  # before abbreviations_router: /abbreviations/suggestions vs /{id}
     app.include_router(abbreviations_router)
     app.include_router(export_router)
     return app

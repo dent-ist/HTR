@@ -212,3 +212,25 @@ class ExpandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(max_length=20000)
     ambiguous: Literal["raw", "mark"] = "raw"
+
+
+# ---- M7: optional local-LLM abbreviation suggestions ------------------------------------------------------------
+
+
+class SuggestRequest(BaseModel):
+    """Start a suggestion job. Without `tokens` the app picks abbreviation-like tokens from the verified text."""
+
+    model_config = ConfigDict(extra="forbid")
+    tokens: list[str] | None = Field(default=None, max_length=50, description="ask about exactly these tokens")
+    max_tokens: int | None = Field(default=None, ge=1, le=100, description="how many tokens to ask about (default 25)")
+    context_lines: int | None = Field(default=None, ge=0, le=2, description="neighbouring lines to send, each side")
+
+
+class SuggestionAccept(BaseModel):
+    """Accept a suggestion as it is (empty body) or edit it first."""
+
+    model_config = ConfigDict(extra="forbid")
+    written: str | None = Field(default=None, max_length=200)
+    expansion: str | None = Field(default=None, max_length=2000)
+    notes: str | None = Field(default=None, max_length=2000)
+    case_sensitive: bool = False

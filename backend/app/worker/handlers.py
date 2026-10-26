@@ -98,6 +98,12 @@ def guard_resegment(conn: sqlite3.Connection, page_id: int, force: bool) -> None
         raise Conflict(f"page {page_id} has {n} transcribed line(s); re-segmenting would discard them (use force)")
 
 
+def suggest_job(ctx: JobContext) -> dict:
+    from .suggest import suggest_abbreviations  # imported lazily: only needed when the optional feature is used
+
+    return suggest_abbreviations(ctx)
+
+
 def train_job(ctx: JobContext) -> dict | None:
     from .ml_jobs import train_model  # imported lazily: pulls in the recognition stack
 
@@ -114,4 +120,5 @@ HANDLERS: dict[str, Handler] = {
     "segment": segment_page,
     "predict": predict_job,
     "train": train_job,
+    "suggest": suggest_job,
 }
