@@ -85,6 +85,34 @@ def evaluate(pairs: Sequence[tuple[str, str]]) -> Metrics:
     return Metrics(len(pairs), chars, char_edits, n_words, word_edits)
 
 
+def exact_match(pairs: Sequence[tuple[str, str]]) -> float | None:
+    """Share of samples whose hypothesis equals the reference exactly (case-sensitive); None for no samples."""
+    return sum(1 for r, h in pairs if r == h) / len(pairs) if pairs else None
+
+
+def bootstrap_cer_ci(
+    pairs: Sequence[tuple[str, str]], n_boot: int = 2000, confidence: float = 0.95, seed: int = 1234
+) -> tuple[float, float] | None:
+    """Percentile bootstrap confidence interval of the micro-averaged CER: samples are resampled with replacement
+    (`n_boot` times), each resample's CER is total edits over total reference characters, and the interval is the
+    (1-confidence)/2 and 1-(1-confidence)/2 quantiles. Deterministic for a given seed. None when there are no
+    reference characters."""
+    import numpy as np
+
+    edits = np.array([edit_distance(r, h) for r, h in pairs], dtype=np.float64)
+    chars = np.array([len(r) for r, _ in pairs], dtype=np.float64)
+    if not len(pairs) or chars.sum() == 0:
+        return None
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(pairs), size=(n_boot, len(pairs)))
+    den = chars[idx].sum(axis=1)
+    ok = den > 0
+    stats = edits[idx].sum(axis=1)[ok] / den[ok]
+    a = (1 - confidence) / 2
+    lo, hi = np.quantile(stats, [a, 1 - a])
+    return float(lo), float(hi)
+
+
 def cer(pairs: Sequence[tuple[str, str]]) -> float | None:
     return evaluate(pairs).cer
 
