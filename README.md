@@ -7,7 +7,7 @@ Full spec: [docs/implementation-plan.md](docs/implementation-plan.md).
 
 ```
 backend/     uv project (Python 3.11): FastAPI app, tests, pyproject.toml + uv.lock
-frontend/    placeholder (React, from M3)
+frontend/    React + TypeScript + Vite app (M3): src/api (typed client), src/library, src/editor, e2e/ (Playwright)
 scripts/     check_env.py, inspect_images.py, htr.py (import/segment), review_sheet.py, make_synthetic_pages.py
 backend/app/pipeline/   measure, preprocess, segment, pagexml, overlay, workflow, review (M1 pipeline)
 backend/app/db/         SQLite connection + versioned migrations
@@ -49,6 +49,64 @@ CUDA operation. Keep training batch sizes small enough for 4 GB.
 | `make lint` | ruff check + ruff format --check |
 | `make format` | ruff autofix + format |
 | `make serve` | The API on `http://127.0.0.1:8000` (loopback only); docs at `/docs`. See "M2: backend API" below |
+| `make setup-frontend` | One-time: `npm ci` plus headless Chromium for the e2e test (and unpacks missing Chromium system libraries without sudo). Dev tooling downloads only |
+| `make dev-frontend` | Vite dev server on `http://127.0.0.1:5173` |
+| `make dev` | API (8000) and frontend (5173) together; Ctrl+C stops both |
+| `make test-frontend` | Vitest unit and component tests |
+| `make lint-frontend` | ESLint plus strict `tsc` type check |
+| `make test-e2e` | Opt-in Playwright end-to-end test (real backend on a temp data dir, real Kraken, headless Chromium) |
+
+## M3: labeling UI (frontend)
+
+Part A of M3: library and page editor. Segmentation repair tools (merge, split, redraw baseline, region ignore) come
+later; the editor state machine (`frontend/src/editor/transcription.ts`) and canvas are structured so those modes can
+be added. There are no prediction/confidence displays yet.
+
+**Node**: Node 22 LTS (pinned in `frontend/.nvmrc`; 20 or newer works, `engines` says `>=20`). It is not in Ubuntu by
+default; install it at user level without sudo, e.g. the official tarball:
+
+```
+mkdir -p ~/.local/node && cd ~/.local/node
+curl -fsSLO https://nodejs.org/dist/latest-v22.x/node-v22.23.4-linux-x64.tar.xz   # pick the current 22.x file name
+tar xf node-v22.23.4-linux-x64.tar.xz && ln -sfn "$PWD/node-v22.23.4-linux-x64" current
+for b in node npm npx; do ln -sf ~/.local/node/current/bin/$b ~/.local/bin/$b; done
+```
+
+(fnm or nvm work too.) The Makefile puts `~/.local/bin` and `~/.local/node/current/bin` first on `PATH`, which also
+keeps WSL from picking up a Windows `node.exe`. Then `make setup-frontend`.
+
+**Run**: `make dev` (both servers), or in two terminals `make serve` and `make dev-frontend`, then open
+`http://127.0.0.1:5173`. The API base URL defaults to `http://127.0.0.1:8000`; override with `VITE_API_BASE_URL`
+(the browser origin must stay `127.0.0.1:5173` or `localhost:5173`, which is all the API's CORS allows). The built app
+bundles everything and makes no outbound requests (system fonts, no CDN).
+
+**Library**: create a document, drop images onto it (or "Choose images"), press Segment per page; job progress and
+errors are polled and shown, identical re-uploads are reported as "Already imported". Re-segmenting a page that has
+transcriptions asks for confirmation (it replaces all lines).
+
+**Page editor** (open a page with Transcribe): the page canvas supports wheel zoom at the cursor, drag to pan,
+click a line to select it, and keeps the selected line in view. Lines are blue (unlabeled), green (ground truth),
+grey dashed (ignored), orange (selected). Below it: the line crop and a text box. Typing is optimistic: a failed
+save never discards text, it shows an error with Retry, and leaving the page with unsaved edits asks first.
+
+| Shortcut | Action |
+|---|---|
+| Enter | Save text, mark as ground truth, go to the next active (non-ignored) line |
+| Tab / Shift+Tab | Next / previous line (all lines, no saving; typed text is kept per line) |
+| Esc | Revert unsaved edits on the current line (closes the help first if it is open) |
+| Ctrl+I | Ignore / un-ignore the current line |
+| Alt+PageDown / Alt+PageUp | Next / previous page of the document |
+| Alt+0 | Fit page to width |
+| Ctrl+/ or F1 (or `?` when focus is not in the text box) | Shortcut help overlay |
+
+In the text box Tab and Enter belong to the transcription flow; toolbar buttons stay reachable with the mouse or by
+clicking out of the box (buttons keep their normal Tab/Enter behaviour once focused).
+
+**Tests**: `make test-frontend` (API client, the pure transcription reducer and key mapping, zoom/pan/hit-test
+maths, component tests for the keyboard flow and library). `make test-e2e` generates a synthetic page, uploads it,
+segments it with real Kraken, transcribes three lines with the keyboard, reloads and checks the saved text and
+ground-truth flags through the API, with no console errors. Screenshots land in `frontend/test-results/screenshots`.
+It uses API port 8100 and web port 5173 and a temporary data dir, never `data/`.
 
 ## Inspecting a folder of scans
 
