@@ -121,7 +121,7 @@ Everything is in the `data/` folder of the project (git-ignored; override with `
 | `data/pagexml/` | one PAGE-XML file per segmented page, kept in sync with the database |
 | `data/models/` | the pretrained base model and the models you trained |
 | `data/training/` | per-run training exports (safe to delete when no job is running) |
-| `data/logs/htr.log` | the app log (rotating, 5 x 1 MB); never contains your text |
+| `data/logs/htr.log` | the app log (JSON lines, rotating: 1 MB per file, 5 older files kept); never contains your text |
 | `data/tmp/` | uploads in progress |
 
 You can inspect these in Windows Explorer under `\\wsl$\Ubuntu\home\<you>\HTR\data`, but do not edit them while the
@@ -244,6 +244,23 @@ sudo; run it again, or `sudo npx playwright install-deps chromium`.
 
 ## How this page was validated
 
-The steps above were followed literally in a new directory from a fresh `git clone` of the repository, with a new
-Python virtual environment and a new `node_modules`. What that did and did not cover is recorded in the milestone
-report; it was not possible to test a brand-new WSL distribution or a machine without an NVIDIA driver.
+Sections 2 to 6 were followed from a fresh `git clone` of the repository in a brand-new home directory (no `~/.local`,
+no `~/.cache`, empty uv and npm caches, a new virtual environment and a new `node_modules`), using only the commands
+written here:
+
+* `make setup-node` (Node v22.23.4, checksum verified), the uv installer, `make setup` (PyTorch 2.9.1+cu126, Kraken
+  7.1.1 and the rest, about a minute and a half on a fast line), `make setup-frontend` (npm packages, Chromium, and the
+  three system libraries unpacked without sudo), `make base-model`, `make fonts` and `make check` (all OK on a GTX 1050 Ti
+  under WSL2).
+* `make dev`: API on 127.0.0.1:8000 and web app on 127.0.0.1:5173, reachable from the Windows side by both
+  `127.0.0.1` and `localhost`; `/health/details` answers; a forged `Host` header gets 421; a second `make serve` fails
+  with "address already in use"; Ctrl+C frees both ports.
+* The port-change recipe in "Troubleshooting": a real Chromium opened the web app started with `VITE_API_BASE_URL` and
+  contacted only the new API port.
+* `make verify-offline` (import, segment, train, predict, export and bundle with no network) and the full test suites
+  ran from that clone.
+
+Not validated: installing WSL2 and Ubuntu on a machine that does not have them (section 1), the `sudo apt install` line
+(the packages were already present), a machine without an NVIDIA driver (the CPU fallback is covered by tests, not by a
+real driverless run), and clicking through the browser walkthrough in section 7 by hand (its steps are covered by the
+automated browser tests and the API flow, not by a person following this text).
