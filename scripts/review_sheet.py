@@ -5,9 +5,10 @@
   review_sheet.py score  [SHEET.csv]
 
 `sample` picks N segmented pages (the ones with the most import warnings first, the rest at random) and writes a
-CSV with columns page, detected_lines, correct_lines (you fill in), notes. Open data/overlays/<page>.png for each
-page and count how many of the detected lines are segmented correctly.
-`score` reads the filled sheet, prints the share of correct lines and the plan's decision:
+CSV with columns page, detected_lines, correct_lines, missed_lines, notes. Open data/overlays/<page>.png for each
+page; fill correct_lines (detected lines that are right) and missed_lines (real lines with no detected line).
+Both are required on every row (0 is fine, blank is an error).
+`score` reads the filled sheet and prints share = correct / (detected + missed) and the plan's decision:
 > 90% proceed; 70-90% prioritize repair tools; < 70% tune the segmenter.
 """
 
@@ -57,8 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    print(f"pages scored: {sc.pages_scored} (blank rows skipped: {sc.pages_blank})")
-    print(f"detected lines: {sc.detected}; correct: {sc.correct}" + (f"; missed: {sc.missed}" if sc.missed else ""))
+    print(f"pages scored: {sc.pages}")
+    print(f"detected lines: {sc.detected}; correct: {sc.correct}; missed: {sc.missed}")
     print(f"share correctly segmented: {sc.share:.1f}%")
     print(f"decision: {sc.decision}")
     return 0

@@ -83,14 +83,33 @@ All commands run through `uv run --project backend python ...` (shown without th
      the manifest is saved after every page; exit status 1 if any page failed. `--device auto` uses the GPU if
      available, and falls back to CPU on CUDA out-of-memory.
 4. **Review sample**: `scripts/review_sheet.py sample [-n 20]` writes `data/review_sheet.csv` with columns
-   `page, detected_lines, correct_lines, notes` for N pages: the ones with the most import warnings first, the rest
-   chosen at random (seeded).
-5. **Judge by eye** (human step): open `data/overlays/<page>.png` for each page and fill `correct_lines` with how
-   many of the detected lines are segmented correctly (one clean line, nothing clipped, merged or split). Lines the
-   segmenter missed entirely are not in `detected_lines`; to count them, add an optional integer column
-   `missed_lines` (they are added to the denominator).
-6. **Decide**: `scripts/review_sheet.py score [data/review_sheet.csv]` prints the share of correct lines and the plan's
-   decision: more than 90%: proceed; 70 to 90%: prioritize repair tools; below 70%: tune the segmenter.
+   `page, detected_lines, correct_lines, missed_lines, notes` for N pages: the ones with the most import warnings
+   first, the rest chosen at random (seeded).
+5. **Judge by eye** (human step): open `data/overlays/<page>.png` for each page and fill in
+   - `correct_lines`: how many of the detected lines are segmented correctly (one clean line, nothing clipped,
+     merged or split);
+   - `missed_lines`: how many real text lines have no detected line at all.
+
+   Both columns are required on every row; enter `0` when there are none. A blank value is an error, so no page is
+   silently skipped.
+6. **Decide**: `scripts/review_sheet.py score [data/review_sheet.csv]` computes
+   `share = correct / (detected + missed)` over all pages and prints the plan's decision: more than 90%: proceed;
+   70 to 90%: prioritize repair tools; below 70%: tune the segmenter.
+
+   Worked example (invented numbers):
+
+   ```
+   page,detected_lines,correct_lines,missed_lines,notes
+   a,14,12,0,
+   b,10,7,2,margin note merged into line 4
+   c,16,16,1,
+   ```
+
+   detected = 40, correct = 35, missed = 3, so share = 35 / 43 = 81.4%, which means "prioritize repair tools".
+
+The line height shown in the import report is measured on the normalized, deskewed image, the same measurement that
+decides whether the working copy is rescaled. (Measuring the raw original was less reliable: the estimator's band
+thickness grows on slightly skewed pages, so line pitch is the steadier number.)
 
 ### Kraken segmentation model
 

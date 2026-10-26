@@ -8,7 +8,7 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
-COLUMNS = ["page", "detected_lines", "correct_lines", "notes"]
+COLUMNS = ["page", "detected_lines", "correct_lines", "missed_lines", "notes"]
 PROCEED, REPAIR, TUNE = 90.0, 70.0, 70.0
 
 
@@ -32,18 +32,17 @@ def write_sheet(manifest: dict[str, dict], pages: list[str], path: Path) -> None
         w = csv.writer(f)
         w.writerow(COLUMNS)
         for pid in pages:
-            w.writerow([pid, manifest[pid]["segmentation"]["lines"], "", ""])
+            w.writerow([pid, manifest[pid]["segmentation"]["lines"], "", "", ""])
 
 
 @dataclass
 class Score:
-    pages_scored: int
-    pages_blank: int
+    pages: int
     detected: int
     correct: int
-    share: float  # percent
+    missed: int
+    share: float  # percent: correct / (detected + missed)
     decision: str
-    missed: int = 0
 
 
 def decide(share_pct: float) -> str:
@@ -54,29 +53,37 @@ def decide(share_pct: float) -> str:
     return "TUNE THE SEGMENTER: try other settings, then fine-tune on corrected pages (< 70% correct)"
 
 
+def _int(path: Path, line: int, page: str, column: str, raw: str | None) -> int:
+    raw = (raw or "").strip()
+    if not raw:
+        raise ValueError(f"{path} line {line} ({page}): {column} is blank (enter 0 if there are none)")
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"{path} line {line} ({page}): {column} must be an integer, got {raw!r}") from None
+    if value < 0:
+        raise ValueError(f"{path} line {line} ({page}): {column} must not be negative")
+    return value
+
+
 def score_sheet(path: Path) -> Score:
-    """Share = correct / detected over rows with correct_lines filled in. An optional `missed_lines` column
-    (lines the segmenter did not find) is added to the denominator when present."""
+    """Share = correct / (detected + missed) over ALL rows; every row needs correct_lines and missed_lines filled in
+    (0 is a valid answer; blank is an error so that no page is silently skipped)."""
     with open(path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
-    if not rows or not set(COLUMNS[:3]) <= set(rows[0]):
-        raise ValueError(f"{path}: expected columns {COLUMNS}")
-    detected = correct = missed = scored = blank = 0
+    if not rows or not set(COLUMNS) <= set(rows[0]):
+        raise ValueError(f"{path}: expected columns {COLUMNS} and at least one page")
+    detected = correct = missed = 0
     for i, row in enumerate(rows, start=2):
-        raw = (row["correct_lines"] or "").strip()
-        if not raw:
-            blank += 1
-            continue
-        try:
-            det, cor = int(row["detected_lines"]), int(raw)
-            mis = int((row.get("missed_lines") or "0").strip() or 0)
-        except ValueError as e:
-            raise ValueError(f"{path} line {i}: non-integer value ({e})") from e
-        if not 0 <= cor <= det or mis < 0:
-            raise ValueError(f"{path} line {i} ({row['page']}): correct_lines must be between 0 and detected_lines")
-        detected, correct, missed, scored = detected + det, correct + cor, missed + mis, scored + 1
-    if scored == 0:
-        raise ValueError(f"{path}: no rows have correct_lines filled in")
+        page = row["page"]
+        det = _int(path, i, page, "detected_lines", row["detected_lines"])
+        cor = _int(path, i, page, "correct_lines", row["correct_lines"])
+        mis = _int(path, i, page, "missed_lines", row["missed_lines"])
+        if cor > det:
+            raise ValueError(f"{path} line {i} ({page}): correct_lines ({cor}) exceeds detected_lines ({det})")
+        detected, correct, missed = detected + det, correct + cor, missed + mis
     denom = detected + missed
-    share = 100.0 * correct / denom if denom else 0.0
-    return Score(scored, blank, detected, correct, share, decide(share), missed)
+    if denom == 0:
+        raise ValueError(f"{path}: no lines to score (detected and missed are all 0)")
+    share = 100.0 * correct / denom
+    return Score(len(rows), detected, correct, missed, share, decide(share))
