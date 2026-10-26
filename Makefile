@@ -6,7 +6,7 @@ RUN = $(UV) run --project backend
 # inherited from Windows on PATH. Only the *-frontend / dev / e2e targets use it; `make check` does not.
 export PATH := $(HOME)/.local/bin:$(HOME)/.local/node/current/bin:$(PATH)
 
-.PHONY: setup check test test-kraken fonts lint format serve dev setup-frontend dev-frontend test-frontend lint-frontend test-e2e
+.PHONY: setup check test test-kraken test-train base-model synthetic-project fonts lint format serve dev setup-frontend dev-frontend test-frontend lint-frontend test-e2e
 
 setup:
 	$(UV) sync --project backend --python 3.11
@@ -28,6 +28,15 @@ fonts:
 	curl -fsSL -o data/fonts/Caveat.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf"
 	curl -fsSL -o data/fonts/ReenieBeanie.ttf https://raw.githubusercontent.com/google/fonts/main/ofl/reeniebeanie/ReenieBeanie.ttf
 	curl -fsSL -o data/fonts/ShadowsIntoLight.ttf https://raw.githubusercontent.com/google/fonts/main/ofl/shadowsintolight/ShadowsIntoLight.ttf
+
+# One-time dev-time download of the pretrained Kraken base recognition model into data/models/base (gitignored).
+# The running app never goes online.
+base-model:
+	$(RUN) python scripts/get_base_model.py
+
+# Opt-in: tiny real fine-tune + predict (needs `make base-model`; about a minute).
+test-train:
+	cd backend && $(UV) run pytest -m train
 
 lint:
 	cd backend && $(UV) run ruff check .. && $(UV) run ruff format --check ..

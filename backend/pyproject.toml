@@ -48,6 +48,9 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not kraken'"
-markers = ["kraken: runs the real Kraken model (slow); select with -m kraken"]
+addopts = "-m 'not kraken and not train'"
+markers = [
+    "kraken: runs the real Kraken model (slow); select with -m kraken",
+    "train: tiny real fine-tune + predict with Kraken (needs `make base-model`); select with -m train",
+]
 pythonpath = [".", "../scripts"]
