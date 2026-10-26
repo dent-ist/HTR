@@ -44,8 +44,17 @@ def cmd_curve(a) -> int:
     proj = a.project
     res_dir = proj / "experiment" / "results"
     names = sorted(p.stem for p in res_dir.glob(f"{a.prefix}*.json"))
-    runs = [load(proj, n) for n in names]
-    runs.sort(key=lambda r: r["n_train"])
+    all_runs = [load(proj, n) for n in names]
+    all_runs.sort(key=lambda r: (r["n_train"], r["name"]))
+    # several seeds per N: the reported run is the one with the lowest VALIDATION CER (never a held-out set)
+    best: dict[int, dict] = {}
+    for r in all_runs:
+        if r["n_train"] not in best or r["sets"]["val"]["cer"] < best[r["n_train"]]["sets"]["val"]["cer"]:
+            best[r["n_train"]] = r
+    runs = [best[n] for n in sorted(best)]
+    print("seeds (validation CER, 250 samples): " + "; ".join(
+        f"N={n}: " + ", ".join(f"{r['name'].rsplit('_', 1)[-1]} {r['sets']['val']['cer']:.3f} ({r['epochs_run']} ep)"
+                               for r in all_runs if r["n_train"] == n) for n in sorted(best)) + "\n")  # fmt: skip
     nA = runs[0]["sets"]["seen"]["n"] if runs else 0
     nB = runs[0]["sets"]["unseen"]["n"] if runs else 0
     print(f"| N train | epochs (best) | train s | peak VRAM MB | A seen words (n={nA}): CER [95% CI] | WER | exact "

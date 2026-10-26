@@ -34,6 +34,16 @@ def test_canvas_stretches_horizontally_and_is_deterministic(tmp_path):
     assert wordcrop.apply_word_canvas(src, wordcrop.WordCanvas(1)).size == (30, 20)
 
 
+def test_autocontrast_stretches_the_grey_range_and_changes_the_key(tmp_path):
+    grey = Image.fromarray(np.tile(np.linspace(100, 160, 30, dtype=np.uint8), (20, 1)))  # low-contrast image
+    plain = np.asarray(wordcrop.apply_word_canvas(grey, wordcrop.WordCanvas(1)))
+    boosted = np.asarray(wordcrop.apply_word_canvas(grey, wordcrop.WordCanvas(1, autocontrast=2)))
+    assert plain.min() >= 100 and boosted.min() == 0 and boosted.max() == 255
+    assert wordcrop.WordCanvas(3, 2).key == "word_canvas:x3-c2" != wordcrop.WordCanvas(3).key
+    with pytest.raises(ValueError):
+        wordcrop.WordCanvas(3, autocontrast=60)
+
+
 def test_canvas_key_and_validation():
     assert wordcrop.WordCanvas(3).key == "word_canvas:x3" and wordcrop.WordCanvas(2.5).key == "word_canvas:x2.5"
     with pytest.raises(ValueError):

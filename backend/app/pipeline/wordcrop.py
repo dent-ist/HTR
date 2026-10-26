@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 PAGE_KEY = "page"  # the default pipeline: pages normalized by line height, lines cut by the segmenter
 MODE = "word_canvas"
@@ -36,14 +36,20 @@ class WordCanvas:
     """Horizontal stretch factor applied to a word image (1.0 = grayscale conversion only)."""
 
     stretch_x: float = 3.0
+    # Percent of the darkest and of the lightest pixels clipped before the grey range is stretched to 0..255
+    # (PIL `ImageOps.autocontrast`); 0 = off. Word crops come from very different sources: paper from white to
+    # grey and noisy, so without it the same ink has different grey values in different images.
+    autocontrast: float = 0.0
 
     def __post_init__(self) -> None:
         if not 1.0 <= self.stretch_x <= MAX_STRETCH:
             raise ValueError(f"stretch_x must be between 1 and {MAX_STRETCH:g}")
+        if not 0.0 <= self.autocontrast < 50.0:
+            raise ValueError("autocontrast must be between 0 and 50 (percent)")
 
     @property
     def key(self) -> str:
-        return f"{MODE}:x{self.stretch_x:g}"
+        return f"{MODE}:x{self.stretch_x:g}" + (f"-c{self.autocontrast:g}" if self.autocontrast else "")
 
     def size_for(self, width: int, height: int) -> tuple[int, int]:
         return max(1, round(width * self.stretch_x)), height
@@ -53,9 +59,11 @@ class WordCanvas:
 
 
 def apply_word_canvas(img: Image.Image, canvas: WordCanvas) -> Image.Image:
-    """The single preprocessing function of the word-crop path: grayscale, then horizontal bicubic stretch.
-    Deterministic (same input, same output), no contrast normalization, no deskew, no rescale of the height."""
+    """The single preprocessing function of the word-crop path: grayscale, optional per-image autocontrast, then
+    horizontal bicubic stretch. Deterministic (same input, same output); no deskew, no rescale of the height."""
     gray = img.convert("L")
+    if canvas.autocontrast:
+        gray = ImageOps.autocontrast(gray, cutoff=canvas.autocontrast)
     size = canvas.size_for(*gray.size)
     return gray if size == gray.size else gray.resize(size, Image.BICUBIC)
 

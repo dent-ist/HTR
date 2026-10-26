@@ -173,6 +173,16 @@ def summary(name: str, r: dict) -> str:
     return f"{name}: {f('val')} | {f('seen')} | {f('unseen')}"
 
 
+def auto_recipe(n: int, unit: int = 1000) -> tuple[int, int, int]:
+    """(repeat, max epochs, patience) so that the recipe is defined in training volume, not in epochs, and is the
+    same rule for every N: an epoch always draws at least `unit` samples (a set smaller than `unit` is repeated;
+    augmentation makes every repetition different), the budget is 100 units (12,500 steps at batch 8) and early
+    stopping waits 15 units without validation improvement (never fewer than 4 epochs)."""
+    repeat = max(1, round(unit / n))
+    per_epoch = n * repeat
+    return repeat, max(8, -(-100 * unit // per_epoch)), max(4, -(-15 * unit // per_epoch))
+
+
 def cmd_train(a) -> int:
     p = Project(a.project)
     ids = p.splits.train[: a.n] if a.n else p.splits.train
@@ -183,16 +193,20 @@ def cmd_train(a) -> int:
     shutil.rmtree(run, ignore_errors=True)
     run.mkdir(parents=True)
     start = base_model_file(a.model) if not a.scratch else None
+    repeat, epochs, patience = 1, a.epochs, a.patience
+    if a.auto:
+        repeat, epochs, patience = auto_recipe(len(ids))
+    files = [p.xml(i) for i in ids] * repeat
     req = TrainRequest(
         start_model=start,  # type: ignore[arg-type]
         out_path=run / "model.mlmodel",
-        train_files=[p.xml(i) for i in ids],
+        train_files=files,
         val_files=[p.xml(i) for i in p.splits.val],
         work_dir=run / "work",
-        epochs=a.epochs,
+        epochs=epochs,
         batch_size=a.batch,
         learning_rate=a.lr,
-        patience=a.patience,
+        patience=patience,
         device="auto",
         augment=not a.no_augment,
         seed=a.seed,
@@ -214,8 +228,10 @@ def cmd_train(a) -> int:
         "recipe": {
             "lr": a.lr,
             "batch": a.batch,
-            "epochs_max": a.epochs,
-            "patience": a.patience,
+            "epochs_max": epochs,
+            "patience": patience,
+            "repeat_per_epoch": repeat,
+            "auto_recipe": a.auto,
             "augment": not a.no_augment,
             "seed": a.seed,
         },  # fmt: skip
@@ -310,6 +326,7 @@ def main(argv=None) -> int:
     t.add_argument("--scratch", action="store_true")
     t.add_argument("--spec", default=None)
     t.add_argument("--keep-model", action="store_true")
+    t.add_argument("--auto", action="store_true", help="volume-based recipe: repeat/epochs/patience from N")
     t.set_defaults(fn=cmd_train)
     c = sub.add_parser("ctc")
     c.add_argument("--project", type=Path, required=True)

@@ -87,6 +87,7 @@ def import_dataset(
     data_dir: Path,
     stretch: float,
     limit: int | None = None,
+    autocontrast: float = 0.0,
     val_size: int = WS.DEFAULT_VAL,
     log=print,
 ) -> dict:
@@ -97,7 +98,7 @@ def import_dataset(
     missing = [n for n, _ in labels if not (images / n).is_file()]
     if missing:
         raise ImportRefused(f"{len(missing)} listed images are missing, e.g. {missing[:3]}")
-    canvas = WordCanvas(stretch)
+    canvas = WordCanvas(stretch, autocontrast)
     settings = Settings.for_dir(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     conn = connect(settings.db_path)
@@ -135,6 +136,7 @@ def import_dataset(
     meta = {
         "created_at": now_iso(),
         "stretch_x": stretch,
+        "autocontrast": autocontrast,
         "preprocess_key": canvas.key,
         "source_rows": report,
         "duplicates_skipped": duplicates,
@@ -175,11 +177,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--csv", type=Path, default=DEFAULT_ROOT / "Prescription_Labels.csv")
     ap.add_argument("--data-dir", type=Path, required=True, help="experiment project directory (created)")
     ap.add_argument("--stretch", type=float, default=3.0, help="horizontal stretch of the word canvas (1 = none)")
+    ap.add_argument("--autocontrast", type=float, default=0.0, help="percent clipped per side before stretching grey")
     ap.add_argument("--limit", type=int, default=None, help="import only the first N images (testing)")
     ap.add_argument("--val-size", type=int, default=WS.DEFAULT_VAL)
     args = ap.parse_args(argv)
     try:
-        meta = import_dataset(args.images, args.csv, args.data_dir, args.stretch, args.limit, args.val_size)
+        meta = import_dataset(
+            args.images, args.csv, args.data_dir, args.stretch, args.limit, args.autocontrast, args.val_size
+        )
     except ImportRefused as e:
         print(f"refused: {e}", file=sys.stderr)
         return 2
