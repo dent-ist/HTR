@@ -73,6 +73,20 @@ def usable_lines(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def page_preprocess_keys(conn: sqlite3.Connection, page_ids) -> dict[int, str]:
+    """{page id: line-preprocessing key} (`pipeline.wordcrop`): "page" for ordinary pages."""
+    from ..pipeline.wordcrop import key_of_preprocess
+
+    ids = sorted(set(page_ids))
+    out: dict[int, str] = {}
+    for i in range(0, len(ids), 500):
+        chunk = ids[i : i + 500]
+        q = f"SELECT id, preprocess FROM pages WHERE id IN ({','.join('?' for _ in chunk)})"
+        for r in conn.execute(q, chunk):
+            out[r["id"]] = key_of_preprocess(json.loads(r["preprocess"] or "{}"))
+    return out
+
+
 def assigned_splits(conn: sqlite3.Connection) -> dict[int, str]:
     return {r["line_id"]: r["split"] for r in conn.execute("SELECT line_id, split FROM line_splits")}
 

@@ -22,6 +22,7 @@ from PIL import Image
 
 from ..db import write_tx
 from ..errors import Invalid, JobError
+from ..pipeline import wordcrop
 from ..pipeline.evaluate import evaluate
 from ..pipeline.recognize import (
     Cancelled,
@@ -140,6 +141,26 @@ def _payload_int(p: dict, key: str, default: int, lo: int, hi: int) -> int:
     return v
 
 
+def _check_preprocess(model_row, page_keys) -> str:
+    """The one line preprocessing of the pages being used; JobError when the pages disagree with each other or with
+    the model (a model must only ever read pages prepared like the pages it was trained on, pipeline/wordcrop.py)."""
+    keys = sorted(set(page_keys))
+    if len(keys) > 1:
+        raise JobError(
+            f"the ground-truth pages were prepared in different ways ({', '.join(keys)}); a model can only be "
+            "trained on one kind"
+        )
+    key = keys[0] if keys else wordcrop.PAGE_KEY
+    model_key = models_svc.line_preprocess_key(model_row)
+    if not wordcrop.compatible(model_key, key):
+        name = model_row["name"] or f"model {model_row['id']}"
+        raise JobError(
+            f"{name} was trained for '{model_key}' pages but these pages are '{key}'; using it would silently "
+            "degrade accuracy. Pick a model that matches (or start from a base model)."
+        )
+    return key
+
+
 def train_model(ctx: JobContext) -> dict:
     """payload: {epochs?, batch_size?, learning_rate?, base_model_id?, device?, num_workers?, patience?, augment?,
     warnings?}. See module docstring."""
@@ -160,6 +181,7 @@ def train_model(ctx: JobContext) -> dict:
     rows = training_svc.usable_lines(conn)
     if not rows:
         raise JobError("there are no usable ground-truth lines to train on")
+    line_pp = _check_preprocess(start, training_svc.page_preprocess_keys(conn, {r["page_id"] for r in rows}).values())
     ids = [r["id"] for r in rows]
     splits = training_svc.assign_splits(conn, ids)
     train_ids = [i for i in ids if splits[i] == "train"]
@@ -179,6 +201,7 @@ def train_model(ctx: JobContext) -> dict:
         "device": _device(ctx),
         "optimizer": "AdamW",
         "seed": 1234,
+        "line_preprocess": line_pp,
         "new_characters": "added to the output layer (resize=union)",
     }
     export = training_svc.export_run(
@@ -409,6 +432,8 @@ def predict_lines(ctx: JobContext) -> dict:
     by_page: dict[int, list] = {}
     for r in todo:
         by_page.setdefault(r["page_id"], []).append(r)
+    if todo:
+        _check_preprocess(row, training_svc.page_preprocess_keys(conn, {r["page_id"] for r in todo}).values())
     total = len(todo)
     model_name = row["name"] or f"model {row['id']}"
     counts = {"lines": total, "predicted": 0, "unreadable": 0, "changed_meanwhile": 0, "empty": 0}

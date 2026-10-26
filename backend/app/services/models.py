@@ -67,6 +67,16 @@ def model_file(settings: Settings, row: sqlite3.Row) -> Path:
     return settings.data_dir / row["path"]
 
 
+def line_preprocess_key(row: sqlite3.Row) -> str | None:
+    """The line preprocessing a model was trained for (`pipeline.wordcrop`): the recorded key, "page" for a
+    fine-tuned model that has none (trained before the word-crop path existed), None (no constraint) for a pretrained
+    base model."""
+    key = json.loads(row["hyperparameters"] or "{}").get("line_preprocess")
+    if key:
+        return str(key)
+    return "page" if row["kind"] == "finetuned" else None
+
+
 def resolve_model(conn: sqlite3.Connection, settings: Settings, model_id: int | None) -> sqlite3.Row:
     """The requested model, or the active one. Raises Invalid (422) when there is none and Conflict (409) when its
     file is gone, with a message that says what to do."""
