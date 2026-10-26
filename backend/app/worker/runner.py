@@ -79,6 +79,10 @@ class Worker:
                 if handler is None:
                     raise NotImplementedError(f"no handler for job type '{job['type']}'")
                 result = handler(JobContext(job, conn, self.settings))
+            except queue.JobCancelled as c:
+                if conn.in_transaction:
+                    conn.rollback()
+                queue.mark_cancelled(conn, job["id"], c.result)
             except Exception as e:  # noqa: BLE001  any handler error becomes the job's error message
                 if conn.in_transaction:
                     conn.rollback()

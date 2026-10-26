@@ -27,3 +27,9 @@ class UnsupportedMedia(ApiError):
 
 class TooLarge(ApiError):
     status_code = 413
+
+
+class JobError(ApiError):
+    """A job failed for a reason the user can act on; `detail` is shown to them verbatim as the job's error."""
+
+    status_code = 500

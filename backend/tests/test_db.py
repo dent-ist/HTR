@@ -25,10 +25,46 @@ def columns(conn, table):
 
 
 def test_migrate_creates_schema_and_records_version(conn):
-    assert migrate(conn) == LATEST_VERSION == 1
+    assert migrate(conn) == LATEST_VERSION == 2
     assert EXPECTED_TABLES <= tables(conn)
-    row = conn.execute("SELECT version, name FROM schema_version").fetchone()
-    assert (row["version"], row["name"]) == (1, "initial schema")
+    rows = conn.execute("SELECT version, name FROM schema_version ORDER BY version").fetchall()
+    assert [(r["version"], r["name"]) for r in rows] == [(1, "initial schema"), (2, "models registry and splits")]
+
+
+def test_v2_adds_model_registry_columns_and_split_tables(conn):
+    migrate(conn)
+    assert columns(conn, "models") >= {
+        "id", "path", "base_model", "trained_at", "train_lines", "cer",  # from v1
+        "eval_lines", "wer", "engine", "hyperparameters", "split_info", "is_active", "kind", "parent_model_id",
+        "base_cer", "base_wer", "metrics", "job_id", "license", "name",
+    }  # fmt: skip
+    assert {"cancel_requested"} <= columns(conn, "jobs")
+    assert {"line_id", "split", "assigned_at"} <= columns(conn, "line_splits")
+    assert {"model_id", "line_id", "split"} <= columns(conn, "model_lines")
+
+
+def test_only_one_model_can_be_active(conn):
+    migrate(conn)
+    conn.execute("INSERT INTO models (path, is_active) VALUES ('a', 1)")
+    conn.execute("INSERT INTO models (path, is_active) VALUES ('b', 0)")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE models SET is_active = 1 WHERE path = 'b'")
+
+
+def test_v2_migrates_an_existing_v1_database_in_place(conn):
+    from app.db.migrations import MIGRATIONS
+
+    migrate(conn, MIGRATIONS[:1])
+    conn.execute("INSERT INTO models (path, base_model, train_lines, cer) VALUES ('old.mlmodel', 'x', 5, 0.2)")
+    assert migrate(conn) == 2
+    row = conn.execute("SELECT * FROM models").fetchone()
+    assert (row["path"], row["cer"], row["engine"], row["kind"], row["is_active"]) == (
+        "old.mlmodel",
+        0.2,
+        "kraken",
+        "finetuned",
+        0,
+    )
 
 
 def test_schema_matches_plan_data_model(conn):
@@ -48,9 +84,9 @@ def test_schema_matches_plan_data_model(conn):
 def test_migrate_is_idempotent(conn):
     migrate(conn)
     conn.execute("INSERT INTO documents (name, imported_at) VALUES ('d', ?)", (now_iso(),))
-    assert migrate(conn) == 1
+    assert migrate(conn) == LATEST_VERSION
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == LATEST_VERSION
 
 
 def test_pragmas_wal_and_foreign_keys(conn):
@@ -60,10 +96,10 @@ def test_pragmas_wal_and_foreign_keys(conn):
 
 def test_later_migration_applies_on_top(conn):
     migrate(conn)
-    extra = Migration(2, "add note", "ALTER TABLE documents ADD COLUMN note TEXT;")
+    extra = Migration(LATEST_VERSION + 1, "add note", "ALTER TABLE documents ADD COLUMN note TEXT;")
     from app.db.migrations import MIGRATIONS
 
-    assert migrate(conn, [*MIGRATIONS, extra]) == 2
+    assert migrate(conn, [*MIGRATIONS, extra]) == LATEST_VERSION + 1
     assert "note" in columns(conn, "documents")
 
 
@@ -71,11 +107,11 @@ def test_failing_migration_rolls_back_and_keeps_old_version(conn):
     from app.db.migrations import MIGRATIONS
 
     migrate(conn)
-    bad = Migration(2, "broken", "CREATE TABLE half (id INTEGER); INSERT INTO nonexistent VALUES (1);")
+    bad = Migration(LATEST_VERSION + 1, "broken", "CREATE TABLE half (id INTEGER); INSERT INTO nonexistent VALUES (1);")
     with pytest.raises(sqlite3.OperationalError):
         migrate(conn, [*MIGRATIONS, bad])
     assert "half" not in tables(conn)
-    assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 1
+    assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == LATEST_VERSION
     assert not conn.in_transaction
 
 

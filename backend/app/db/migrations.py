@@ -103,7 +103,53 @@ CREATE TABLE abbreviations (
 );
 """
 
-MIGRATIONS: list[Migration] = [Migration(1, "initial schema", _V1)]
+_V2 = """
+-- M4: model registry, fixed held-out split, cooperative job cancellation.
+
+-- A running train/predict job is cancelled by setting this flag; the handler polls it and stops.
+ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1));
+
+-- models: `path` is relative to the data directory. kind='base' rows are pretrained models found under
+-- data/models/base (no training data, no metrics of their own); kind='finetuned' rows are produced by train jobs.
+-- base_model is a human-readable name of the model training started from; parent_model_id points at its row.
+-- cer/wer are measured on the held-out lines at train time (eval_lines of them); base_cer/base_wer are the same
+-- measurement for the starting model on the same lines, so each round shows its own before/after.
+ALTER TABLE models ADD COLUMN name TEXT;
+ALTER TABLE models ADD COLUMN kind TEXT NOT NULL DEFAULT 'finetuned' CHECK (kind IN ('base', 'finetuned'));
+ALTER TABLE models ADD COLUMN engine TEXT NOT NULL DEFAULT 'kraken';
+ALTER TABLE models ADD COLUMN parent_model_id INTEGER REFERENCES models(id) ON DELETE SET NULL;
+ALTER TABLE models ADD COLUMN eval_lines INTEGER;
+ALTER TABLE models ADD COLUMN wer REAL;
+ALTER TABLE models ADD COLUMN base_cer REAL;
+ALTER TABLE models ADD COLUMN base_wer REAL;
+ALTER TABLE models ADD COLUMN hyperparameters TEXT NOT NULL DEFAULT '{}';  -- json
+ALTER TABLE models ADD COLUMN split_info TEXT NOT NULL DEFAULT '{}';       -- json: rule, counts, run directory
+ALTER TABLE models ADD COLUMN metrics TEXT NOT NULL DEFAULT '{}';          -- json: per-epoch history, timings
+ALTER TABLE models ADD COLUMN job_id INTEGER;
+ALTER TABLE models ADD COLUMN license TEXT;
+ALTER TABLE models ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1));
+CREATE UNIQUE INDEX idx_models_one_active ON models(is_active) WHERE is_active = 1;
+CREATE UNIQUE INDEX idx_models_base_path ON models(path) WHERE kind = 'base';
+
+-- Which lines each fine-tuned model saw: split is 'train' or 'eval' (the held-out set; never trained on).
+-- line_id has no foreign key on purpose: the record of what a model was trained on outlives later line edits.
+CREATE TABLE model_lines (
+    model_id INTEGER NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    line_id  INTEGER NOT NULL,
+    split    TEXT NOT NULL CHECK (split IN ('train', 'eval')),
+    PRIMARY KEY (model_id, line_id)
+);
+
+-- The persistent train/held-out assignment of ground-truth lines (see services/training.py). A line is assigned the
+-- first time a training run sees it and never moves afterwards.
+CREATE TABLE line_splits (
+    line_id     INTEGER PRIMARY KEY REFERENCES lines(id) ON DELETE CASCADE,
+    split       TEXT NOT NULL CHECK (split IN ('train', 'eval')),
+    assigned_at TEXT NOT NULL
+);
+"""
+
+MIGRATIONS: list[Migration] = [Migration(1, "initial schema", _V1), Migration(2, "models registry and splits", _V2)]
 LATEST_VERSION = MIGRATIONS[-1].version
 
 

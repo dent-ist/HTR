@@ -11,6 +11,17 @@ from ..errors import Conflict, NotFound
 
 INTERRUPTED = "interrupted: the server stopped while this job was running"
 
+# Job types whose handlers poll for a cancel request, so a *running* job of these types can be cancelled.
+COOPERATIVE_TYPES = frozenset({"train", "predict"})
+
+
+class JobCancelled(Exception):
+    """Raised by a handler (via JobContext.check_cancelled) to end the job as cancelled. `result` is kept."""
+
+    def __init__(self, result: dict | None = None):
+        super().__init__("cancelled")
+        self.result = result
+
 
 def job_dict(r: sqlite3.Row) -> dict:
     return {
@@ -20,6 +31,7 @@ def job_dict(r: sqlite3.Row) -> dict:
         "payload": json.loads(r["payload"]),
         "progress": r["progress"],
         "error": r["error"],
+        "cancel_requested": bool(r["cancel_requested"]),
         "result": json.loads(r["result"]) if r["result"] else None,
         "created_at": r["created_at"],
         "started_at": r["started_at"],
@@ -82,6 +94,24 @@ def set_progress(conn: sqlite3.Connection, job_id: int, progress: float) -> None
     conn.execute("UPDATE jobs SET progress = ? WHERE id = ? AND status = 'running'", (p, job_id))
 
 
+def set_info(conn: sqlite3.Connection, job_id: int, info: dict[str, Any]) -> None:
+    """Live status of a running job (current epoch, loss, ...), shown as the job's `result` until it finishes."""
+    conn.execute("UPDATE jobs SET result = ? WHERE id = ? AND status = 'running'", (json.dumps(info), job_id))
+
+
+def cancel_requested(conn: sqlite3.Connection, job_id: int) -> bool:
+    r = conn.execute("SELECT cancel_requested FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    return bool(r and r["cancel_requested"])
+
+
+def mark_cancelled(conn: sqlite3.Connection, job_id: int, result: dict | None = None) -> None:
+    with write_tx(conn):
+        conn.execute(
+            "UPDATE jobs SET status = 'cancelled', result = COALESCE(?, result), finished_at = ? WHERE id = ?",
+            (json.dumps(result) if result is not None else None, now_iso(), job_id),
+        )
+
+
 def finish(conn: sqlite3.Connection, job_id: int, result: dict | None = None) -> None:
     with write_tx(conn):
         conn.execute(
@@ -98,14 +128,21 @@ def fail(conn: sqlite3.Connection, job_id: int, error: str) -> None:
 
 
 def cancel(conn: sqlite3.Connection, job_id: int) -> dict:
-    """Cancel a job that has not started. A running job cannot be interrupted (it holds the GPU)."""
+    """Cancel a job. A queued job is cancelled at once. A running train/predict job is asked to stop: the handler
+    notices at its next checkpoint (a batch or page), so the job stays 'running' with `cancel_requested` true until
+    then. Other running jobs (segmentation) cannot be interrupted."""
     with write_tx(conn):
-        r = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        r = conn.execute("SELECT status, type FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if r is None:
             raise NotFound(f"job {job_id} not found")
-        if r["status"] != "queued":
-            raise Conflict(f"job {job_id} is {r['status']}; only queued jobs can be cancelled")
-        conn.execute("UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE id = ?", (now_iso(), job_id))
+        if r["status"] == "queued":
+            conn.execute("UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE id = ?", (now_iso(), job_id))
+        elif r["status"] == "running" and r["type"] in COOPERATIVE_TYPES:
+            conn.execute("UPDATE jobs SET cancel_requested = 1 WHERE id = ?", (job_id,))
+        elif r["status"] == "running":
+            raise Conflict(f"job {job_id} is a running {r['type']} job, which cannot be interrupted")
+        else:
+            raise Conflict(f"job {job_id} is {r['status']}; only queued or running jobs can be cancelled")
     return get_job(conn, job_id)
 
 
