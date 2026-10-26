@@ -49,10 +49,15 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.per-file-ignores]
 # fixtures are imported from test_ml_jobs and then used as parameters
 "tests/test_active_learning.py" = ["F811"]
+"tests/test_prediction_state.py" = ["F811"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not kraken and not train'"
+# Temp hygiene: a passing test's temp directory is deleted right after the test (and the whole base directory at the
+# end of a fully green run); only failed tests keep theirs, and only the newest run. Everything lives under $TMPDIR.
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 1
 markers = [
     "kraken: runs the real Kraken model (slow); select with -m kraken",
     "train: tiny real fine-tune + predict with Kraken (needs `make base-model`); select with -m train",

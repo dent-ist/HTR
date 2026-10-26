@@ -6,7 +6,8 @@ set -euo pipefail
 
 DEST="$HOME/.local/chromium-libs"
 LIBDIR="$DEST/root/usr/lib/x86_64-linux-gnu"
-BIN=$(ls -d "$HOME"/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell 2>/dev/null | tail -1 || true)
+BROWSERS="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+BIN=$(ls -d "$BROWSERS"/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell 2>/dev/null | tail -1 || true)
 [ -n "$BIN" ] || { echo "Chromium not installed yet: run 'make setup-frontend' first" >&2; exit 1; }
 
 missing() { LD_LIBRARY_PATH="$LIBDIR:${LD_LIBRARY_PATH:-}" ldd "$BIN" | grep "not found" || true; }

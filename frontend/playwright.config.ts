@@ -8,12 +8,16 @@ import { defineConfig } from "@playwright/test";
 const API_PORT = 8100;
 const WEB_PORT = 5173;
 // Config is evaluated again in workers; the env var makes them reuse the directory chosen by the main process.
-process.env.HTR_E2E_DATA ??= mkdtempSync(join(tmpdir(), "htr-e2e-"));
+// Everything the run writes to the temp directory (the app's data dir, generated page images) lives under one root,
+// which the global teardown deletes, so a run leaves nothing behind (set HTR_E2E_KEEP=1 to keep it for debugging).
+process.env.HTR_E2E_ROOT ??= mkdtempSync(join(tmpdir(), "htr-e2e-"));
+process.env.HTR_E2E_DATA ??= join(process.env.HTR_E2E_ROOT, "data");
 process.env.HTR_E2E_API ??= `http://127.0.0.1:${API_PORT}`;
 process.env.HTR_E2E_SHOTS ??= join(process.cwd(), "test-results", "screenshots");
 
 export default defineConfig({
   testDir: "./e2e",
+  globalTeardown: "./e2e/global-teardown.ts",
   timeout: 300_000,
   expect: { timeout: 15_000 },
   workers: 1,

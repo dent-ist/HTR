@@ -6,7 +6,7 @@ RUN = $(UV) run --project backend
 # inherited from Windows on PATH. Only the *-frontend / dev / e2e targets use it; `make check` does not.
 export PATH := $(HOME)/.local/bin:$(HOME)/.local/node/current/bin:$(PATH)
 
-.PHONY: setup check test test-kraken test-train base-model synthetic-project synthetic-report synthetic-rounds fonts lint format serve dev setup-frontend dev-frontend test-frontend lint-frontend test-e2e
+.PHONY: setup check test test-kraken test-train base-model synthetic-project synthetic-report synthetic-rounds fonts lint format serve dev setup-frontend dev-frontend test-frontend lint-frontend test-e2e clean-test verify-offline audit-network setup-node
 
 setup:
 	$(UV) sync --project backend --python 3.11
@@ -14,8 +14,23 @@ setup:
 check:
 	$(RUN) python scripts/check_env.py
 
+# Temp files: passing tests leave nothing behind (see tmp_path_retention_* in backend/pyproject.toml); everything goes
+# to $$TMPDIR (default /tmp). `make clean-test` removes whatever a crashed or failed run left.
 test:
 	cd backend && $(UV) run pytest
+
+# Remove temp data left by test runs (pytest base directories, e2e roots, offline-smoke directories) and test output.
+clean-test:
+	rm -rf "$${TMPDIR:-/tmp}"/pytest-of-* "$${TMPDIR:-/tmp}"/htr-e2e-* "$${TMPDIR:-/tmp}"/htr-offline-* 	  backend/.pytest_cache frontend/test-results frontend/playwright-report
+
+# Static audit: no network client code or external URLs in the app, the frontend source or the built frontend.
+audit-network:
+	$(RUN) python scripts/audit_network.py
+
+# Proof that the app needs no network: static audit, then the real import -> segment -> train -> predict flow inside
+# an offline network namespace (unshare -rn, loopback only). Needs `make base-model` and `make setup-frontend` first.
+verify-offline:
+	bash scripts/verify_offline.sh
 
 # Real Kraken blla run on a generated synthetic page (no mocks). The default segmentation model
 # (blla.mlmodel) ships inside the kraken wheel, so no model download is needed.
@@ -68,6 +83,10 @@ serve:
 
 # ---- frontend (React + TypeScript + Vite, M3) ----
 
+# One-time, needs the network: Node 22 LTS at user level (no sudo) into ~/.local/node, linked into ~/.local/bin.
+setup-node:
+	bash scripts/install_node.sh
+
 # One-time (dev tooling downloads only): npm packages from the lockfile, plus Chromium for the e2e test.
 setup-frontend:
 	node --version
@@ -90,5 +109,6 @@ dev:
 
 # Opt-in end-to-end test: real backend on a temp data dir (real Kraken segmentation) + Vite + headless Chromium.
 # Slow; not part of `make test` or `make test-frontend`.
+# Temp data (the app's data dir, generated pages) is deleted afterwards, also when the run fails.
 test-e2e:
-	cd frontend && LD_LIBRARY_PATH="$(HOME)/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu:$$LD_LIBRARY_PATH" npm run test:e2e
+	cd frontend && LD_LIBRARY_PATH="$(HOME)/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu:$$LD_LIBRARY_PATH" npm run test:e2e; 	  status=$$?; rm -rf "$${TMPDIR:-/tmp}"/htr-e2e-*; exit $$status

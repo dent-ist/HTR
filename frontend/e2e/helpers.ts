@@ -28,7 +28,7 @@ export interface ApiPage {
 
 /** A synthetic page (scripts/make_synthetic_pages.py, NOT real data) copied to a unique file name. */
 export function makeSyntheticPage(seed: number, filename: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "htr-e2e-img-"));
+  const dir = mkdtempSync(join(process.env.HTR_E2E_ROOT ?? tmpdir(), "img-"));
   execFileSync(
     "uv",
     ["run", "--project", resolve("../backend"), "python", resolve("../scripts/make_synthetic_pages.py"), dir, "-n", "1", "--seed", String(seed)],

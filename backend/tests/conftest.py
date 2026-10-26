@@ -7,6 +7,45 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 
+# ---- guards that apply to the whole suite -------------------------------------------------------------------------
+
+
+def _loopback_test_client():
+    """The API only answers requests whose Host header names this machine (DNS-rebinding protection), so the
+    TestClient must talk to 127.0.0.1 instead of Starlette's default host name `testserver`."""
+    from starlette import testclient
+
+    original = testclient.TestClient.__init__
+
+    def init(self, app, base_url="http://127.0.0.1:8000", *args, **kwargs):
+        original(self, app, base_url, *args, **kwargs)
+
+    testclient.TestClient.__init__ = init
+
+
+_loopback_test_client()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_outbound_network():
+    """Any connect / sendto / DNS lookup of a non-loopback address fails the test (tests/netguard.py)."""
+    from tests import netguard
+
+    mp = pytest.MonkeyPatch()
+    netguard.install(mp)
+    yield
+    mp.undo()
+
+
+@pytest.fixture(autouse=True)
+def _network_violations_fail_the_test():
+    from tests import netguard
+
+    netguard.violations.clear()
+    yield
+    assert not netguard.violations, f"outbound network access attempted: {netguard.violations}"
+
+
 def fake_blla_factory(n_lines=3, fail_on=None):
     """Replacement for segment.run_blla: n horizontal lines, optionally raising for images of a given width."""
 
