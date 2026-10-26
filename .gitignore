@@ -31,3 +31,8 @@ Thumbs.db
 frontend/test-results/
 frontend/playwright-report/
 frontend/*.tsbuildinfo
+
+# External datasets and experiment output (licence unknown / personal): never committed
+datasets/
+data/external/
+experiments-out/
