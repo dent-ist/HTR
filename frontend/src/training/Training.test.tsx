@@ -19,6 +19,8 @@ const summary = (over: Partial<TrainingSummary> = {}): TrainingSummary => ({
   recommended_per_retrain: 50,
   recommended: 100,
   predictable_lines: 180,
+  retrain_suggested: false,
+  retrain_reason: "",
   active_model: { id: 1, name: "revcity-english-handwriting", kind: "base", cer: null },
   warnings: ["Only 24 ground-truth lines; about 100 are recommended for the first round."],
   ...over,

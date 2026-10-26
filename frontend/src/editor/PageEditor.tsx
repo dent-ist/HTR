@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../api/client";
 import type { Page, PageDetail } from "../api/types";
-import { navigate, pageHash, setNavigationGuard } from "../router";
+import { navigate, pageHash, REVIEW_HASH, setNavigationGuard } from "../router";
 import { HelpOverlay } from "./HelpOverlay";
 import { PageCanvas, type CanvasEvent, type PageCanvasHandle } from "./PageCanvas";
 import { type ModeKind, modeHelp } from "./modes";
 import { currentText, hasUnsaved, keyToAction, selectedLine } from "./transcription";
 import { useRepair } from "./useRepair";
+import { ConfidenceBadge, ConfidenceLegend } from "./ConfidenceBadge";
+import { isPrediction } from "./confidence";
 import { useTranscription } from "./useTranscription";
 
 const UNSAVED_MSG = "You have unsaved or unsent line edits on this page. Leave anyway?";
@@ -199,11 +201,15 @@ export function PageEditor({ api, pageId }: { api: ApiClient; pageId: number }) 
   const gt = active.filter((l) => l.is_ground_truth).length;
   const lineIdx = line ? state.lines.indexOf(line) : -1;
   const refocus = () => setTimeout(focusTarget, 0);
+  const predicted = line ? isPrediction(line) : false;
 
   return (
     <div className="editor" onKeyDown={onKeyDown} ref={rootRef} tabIndex={-1}>
       <header className="editor-bar">
         <button onClick={() => navigate("#/")}>&larr; Library</button>
+        <button onClick={() => navigate(REVIEW_HASH)} title="Review the least certain predictions first">
+          Review
+        </button>
         <h1 title={page.original_filename}>{page.original_filename}</h1>
         <span className="muted" data-testid="progress">
           {gt}/{active.length} lines transcribed
@@ -301,11 +307,22 @@ export function PageEditor({ api, pageId }: { api: ApiClient; pageId: number }) 
                 >
                   <span className="n">{i + 1}</span>
                   <span className="t">{state.drafts[l.id] ?? l.text ?? ""}</span>
-                  <span className="flag">{l.ignored ? "ignored" : l.is_ground_truth ? "GT" : ""}</span>
+                  <span className="flag">
+                    {l.ignored ? (
+                      "ignored"
+                    ) : l.is_ground_truth ? (
+                      "GT"
+                    ) : isPrediction(l) ? (
+                      <ConfidenceBadge confidence={l.confidence!} />
+                    ) : (
+                      ""
+                    )}
+                  </span>
                 </button>
               </li>
             ))}
           </ol>
+          <ConfidenceLegend />
         </nav>
       </div>
 
@@ -323,6 +340,11 @@ export function PageEditor({ api, pageId }: { api: ApiClient; pageId: number }) 
                 </strong>
                 {line.ignored && <span className="badge ign">ignored</span>}
                 {line.is_ground_truth && !line.ignored && <span className="badge gt">ground truth</span>}
+                {predicted && (
+                  <span className="badge pred" data-testid="predicted-badge">
+                    predicted <ConfidenceBadge confidence={line.confidence!} />
+                  </span>
+                )}
                 <span className="spacer" />
                 <button onClick={() => dispatch({ type: "toggleIgnore" })} title="Ctrl+I">
                   {line.ignored ? "Un-ignore" : "Ignore"} (Ctrl+I)
@@ -331,8 +353,14 @@ export function PageEditor({ api, pageId }: { api: ApiClient; pageId: number }) 
               <div className="crop-box">
                 <img src={api.url(line.crop_url)} alt={`Crop of line ${lineNo}`} data-testid="line-crop" key={`${line.id}-${line.polygon.length}-${line.polygon[0]?.join(",")}-${line.baseline.join(",")}`} />
               </div>
+              {predicted && (
+                <p className="pred-label" id="pred-label">
+                  Predicted text, not yet checked: Enter accepts it as ground truth, edit then Enter to correct it, Esc restores the prediction.
+                </p>
+              )}
               <input
                 ref={inputRef}
+                aria-describedby={predicted ? "pred-label" : undefined}
                 className="line-input"
                 type="text"
                 value={text}
@@ -344,7 +372,7 @@ export function PageEditor({ api, pageId }: { api: ApiClient; pageId: number }) 
                 onChange={(e) => dispatch({ type: "edit", text: e.target.value })}
               />
               <p className="hint">
-                Enter save + next &middot; Tab/Shift+Tab move &middot; Esc revert &middot; Ctrl+I ignore &middot; Alt+M/S/B/R repair &middot; Ctrl+Z undo &middot; Ctrl+/ help
+                Enter save/accept + next &middot; Tab/Shift+Tab move &middot; Esc revert &middot; Ctrl+I ignore &middot; Alt+M/S/B/R repair &middot; Ctrl+Z undo &middot; Ctrl+/ help
               </p>
             </>
           )

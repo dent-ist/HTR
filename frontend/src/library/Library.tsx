@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, type ApiClient } from "../api/client";
 import type { Document, Job, Page } from "../api/types";
-import { pageHash, TRAINING_HASH } from "../router";
+import { pageHash, REVIEW_HASH, TRAINING_HASH } from "../router";
+import { RetrainNotice } from "../training/RetrainNotice";
 import { jobIsActive, jobLabel, progressOf, statusLabel } from "./format";
 
 const POLL_MS = 1000;
@@ -140,9 +141,14 @@ export function Library({ api }: { api: ApiClient }) {
     <main className="library">
       <header className="library-head">
         <h1>HTR library</h1>
-        <a className="button" href={TRAINING_HASH}>
-          Training
-        </a>
+        <span className="actions">
+          <a className="button" href={TRAINING_HASH}>
+            Training
+          </a>
+          <a className="button" href={REVIEW_HASH}>
+            Review
+          </a>
+        </span>
         <form onSubmit={createDoc} className="new-doc">
           <label>
             New document name
@@ -154,6 +160,7 @@ export function Library({ api }: { api: ApiClient }) {
         </form>
       </header>
 
+      <RetrainNotice api={api} />
       {error && (
         <p role="alert" className="error banner">
           <span>{error}</span>

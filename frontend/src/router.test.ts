@@ -11,5 +11,6 @@ describe("router", () => {
     expect(parseHash(pageHash(5))).toEqual({ name: "page", id: 5 });
     expect(parseHash("#/training")).toEqual({ name: "training" });
     expect(parseHash("#/training/")).toEqual({ name: "training" });
+    expect(parseHash("#/review")).toEqual({ name: "review" });
   });
 });

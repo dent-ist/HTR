@@ -20,6 +20,8 @@ export interface Line {
   text: string | null;
   text_source: "manual" | "predicted" | null;
   confidence: number | null;
+  /** The model whose prediction this line still holds (null once reviewed or never predicted). */
+  predicted_by_model_id?: number | null;
   is_ground_truth: boolean;
   ignored: boolean;
   crop_url: string;
@@ -144,6 +146,9 @@ export interface TrainingSummary {
   /** The recommended minimum that applies now (first round, or new lines per retrain). */
   recommended: number;
   predictable_lines: number;
+  /** Advice only (never blocks): enough new ground truth since the last round (or enough in total for a first one). */
+  retrain_suggested: boolean;
+  retrain_reason: string;
   active_model: { id: number; name: string | null; kind: string; cer: number | null } | null;
   warnings: string[];
 }
@@ -164,6 +169,8 @@ export interface PredictOptions {
 /** A job just enqueued by POST /jobs/train or /jobs/predict, with non-blocking warnings. */
 export interface StartedJob extends Job {
   warnings: string[];
+  /** true for POST /jobs/round: the train job's result.next_job_id names the chained predict job. */
+  round?: boolean;
 }
 
 export interface EpochRecord {
@@ -197,6 +204,7 @@ export interface TrainResult {
   peak_vram_mb?: number | null;
   seconds?: number;
   warnings?: string[];
+  next_job_id?: number;
 }
 
 /** `result` of a predict job. */
@@ -210,4 +218,50 @@ export interface PredictResult {
   mean_confidence?: number | null;
   device?: string | null;
   cuda_fallback?: boolean;
+}
+
+// ---- review queue and effort (M5) ----
+
+export interface ReviewItem {
+  line: Line;
+  page_id: number;
+  crop_url: string;
+  predicted_text: string;
+  confidence: number;
+  model_id: number | null;
+}
+
+export interface ReviewNext {
+  items: ReviewItem[];
+  remaining: number;
+}
+
+export interface ReviewQueue {
+  total: number;
+  buckets: { min: number; max: number; count: number }[];
+  mean_confidence: number | null;
+  lowest?: ReviewItem[];
+}
+
+export interface ReviewRound {
+  round: number;
+  model_id: number | null;
+  model_name: string | null;
+  kind: string | null;
+  trained_at: string | null;
+  cer: number | null;
+  wer: number | null;
+  reviewed: number;
+  accepted: number;
+  corrected: number;
+  ignored: number;
+  accepted_rate: number | null;
+  mean_edits_per_line: number | null;
+  mean_edits_per_char: number | null;
+}
+
+export interface ReviewStats {
+  rounds: ReviewRound[];
+  total_reviewed: number;
+  accepted_rate: number | null;
 }

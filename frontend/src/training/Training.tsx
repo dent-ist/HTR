@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../api/client";
-import type { Job, Model, PredictResult, TrainResult, TrainingSummary } from "../api/types";
+import type { Job, Model, PredictResult, ReviewStats, TrainResult, TrainingSummary } from "../api/types";
 import { CerChart } from "./CerChart";
+import { EffortCharts } from "./EffortCharts";
 import { dateLabel, isActive, modelLabel, pct } from "./format";
 
 const POLL_MS = 1000;
@@ -24,6 +25,7 @@ const PHASES: Record<string, string> = {
 export function Training({ api }: { api: ApiClient }) {
   const [summary, setSummary] = useState<TrainingSummary | null>(null);
   const [models, setModels] = useState<Model[] | null>(null);
+  const [stats, setStats] = useState<ReviewStats | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [trainJob, setTrainJob] = useState<Job | null>(null);
   const [predictJob, setPredictJob] = useState<Job | null>(null);
@@ -41,6 +43,10 @@ export function Training({ api }: { api: ApiClient }) {
       setSummary(s);
       setModels(m);
       setLoadError(null);
+      api
+        .reviewStats()
+        .then(setStats)
+        .catch(() => setStats(null)); // the effort charts are secondary: never an error banner
     } catch (e) {
       setLoadError(errText(e));
     }
@@ -79,6 +85,12 @@ export function Training({ api }: { api: ApiClient }) {
           const fresh = await api.getJob(job.id);
           set(fresh);
           if (!isActive(fresh)) ended = true;
+          // a round: the finished train job names the predict job queued behind it
+          const next = (fresh.result as TrainResult | null)?.next_job_id;
+          if (fresh.type === "train" && fresh.status === "succeeded" && next !== undefined) {
+            setPredictJob(await api.getJob(next));
+            ended = true;
+          }
         } catch (e) {
           setErr(errText(e));
         }
@@ -102,6 +114,20 @@ export function Training({ api }: { api: ApiClient }) {
     setTrainNotes([]);
     try {
       const job = await api.startTraining({ epochs: epochsValue, batch_size: batchValue });
+      setTrainJob(job);
+      setTrainNotes(job.warnings);
+    } catch (err) {
+      setTrainError(errText(err));
+    }
+  };
+
+  const startRound = async () => {
+    if (epochsValue === null || batchValue === null) return;
+    setTrainError(null);
+    setTrainNotes([]);
+    setPredictJob(null);
+    try {
+      const job = await api.startRound({ epochs: epochsValue, batch_size: batchValue });
       setTrainJob(job);
       setTrainNotes(job.warnings);
     } catch (err) {
@@ -159,6 +185,11 @@ export function Training({ api }: { api: ApiClient }) {
       )}
       {summary === null && !loadError && <p className="muted">Loading...</p>}
 
+      {summary?.retrain_suggested && (
+        <p className="notice retrain" role="status" data-testid="retrain-banner">
+          <strong>Retraining suggested:</strong> {summary.retrain_reason}. This is advice only; you can train whenever you like.
+        </p>
+      )}
       {summary && (
         <section aria-labelledby="gt-heading" className="panel">
           <h2 id="gt-heading">Ground truth</h2>
@@ -238,8 +269,16 @@ export function Training({ api }: { api: ApiClient }) {
               disabled={trainRunning}
             />
           </label>
-          <button type="submit" disabled={!canTrain || trainRunning || epochsValue === null || batchValue === null}>
+          <button type="submit" disabled={!canTrain || trainRunning || predictRunning || epochsValue === null || batchValue === null}>
             Start training
+          </button>
+          <button
+            type="button"
+            onClick={() => void startRound()}
+            disabled={!canTrain || trainRunning || predictRunning || epochsValue === null || batchValue === null}
+            title="Train, then predict every line that is not ground truth with the new model"
+          >
+            Run round (train + predict)
           </button>
         </form>
         <p className="muted small">
@@ -265,6 +304,7 @@ export function Training({ api }: { api: ApiClient }) {
             ))}
           </ul>
         )}
+        {trainJob?.payload.then_predict === true && <RoundStatus train={trainJob} predict={predictJob} />}
         {trainJob && <TrainStatus job={trainJob} onCancel={() => void cancel(trainJob, setTrainJob, setTrainError)} />}
       </section>
 
@@ -299,6 +339,12 @@ export function Training({ api }: { api: ApiClient }) {
       <section aria-labelledby="chart-heading" className="panel">
         <h2 id="chart-heading">Accuracy by round</h2>
         {models && <CerChart models={models} />}
+      </section>
+
+      <section aria-labelledby="effort-heading" className="panel">
+        <h2 id="effort-heading">Review effort by round</h2>
+        {stats && <EffortCharts stats={stats} />}
+        {!stats && <p className="muted">No review data yet.</p>}
       </section>
 
       <section aria-labelledby="models-heading" className="panel">
@@ -363,6 +409,21 @@ export function Training({ api }: { api: ApiClient }) {
         </p>
       </section>
     </main>
+  );
+}
+
+function RoundStatus({ train, predict }: { train: Job; predict: Job | null }) {
+  let text: string;
+  if (isActive(train)) text = "Step 1 of 2: training";
+  else if (train.status !== "succeeded") text = `Stopped: the training step ${train.status === "cancelled" ? "was cancelled" : "failed"}, so no prediction was started.`;
+  else if (predict === null) text = "Training finished; the new model was not activated, so no prediction was started.";
+  else if (isActive(predict)) text = "Step 2 of 2: predicting every line that is not ground truth";
+  else if (predict.status === "succeeded") text = "Round finished: trained and predicted.";
+  else text = `Training finished, but the prediction step ${predict.status === "cancelled" ? "was cancelled" : "failed"}.`;
+  return (
+    <p className="round-status" role="status" data-testid="round-status">
+      <strong>Round:</strong> {text}
+    </p>
   );
 }
 

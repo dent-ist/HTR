@@ -13,6 +13,9 @@ import type {
   Point,
   PredictOptions,
   Rect,
+  ReviewNext,
+  ReviewQueue,
+  ReviewStats,
   SplitResult,
   StartedJob,
   TrainOptions,
@@ -186,6 +189,21 @@ export class ApiClient {
   /** Enqueue a fine-tune job. The response carries non-blocking `warnings`. */
   startTraining(options: TrainOptions = {}): Promise<StartedJob> {
     return this.request("POST", "/jobs/train", { json: options });
+  }
+  /** One active-learning round: train, then (if the new model is activated) predict all non-ground-truth lines. */
+  startRound(options: TrainOptions = {}): Promise<StartedJob> {
+    return this.request("POST", "/jobs/round", { json: options });
+  }
+  reviewNext(exclude: number[] = [], limit = 1): Promise<ReviewNext> {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (exclude.length) q.set("exclude", exclude.join(","));
+    return this.request("GET", `/review/next?${q.toString()}`);
+  }
+  reviewQueue(lowest = 0): Promise<ReviewQueue> {
+    return this.request("GET", `/review/queue${lowest ? `?lowest=${lowest}` : ""}`);
+  }
+  reviewStats(): Promise<ReviewStats> {
+    return this.request("GET", "/review/stats");
   }
   startPrediction(options: PredictOptions = {}): Promise<StartedJob> {
     return this.request("POST", "/jobs/predict", { json: options });

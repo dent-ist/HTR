@@ -1,4 +1,5 @@
 import { type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { BAND_COLOR, BAND_DASH, bandOf, isPrediction } from "./confidence";
 import type { Line, Point } from "../api/types";
 import { IGNORE_OVERLAP, overlapShare } from "./geometry";
 import type { Mode } from "./modes";
@@ -154,11 +155,12 @@ export function PageCanvas({ imageUrl, imageSize, lines, selectedId, mode, onEve
 
     for (const l of lines) {
       if (l.id === selectedId || ghosted(l.id)) continue;
-      const color = l.ignored ? COLORS.ignored : l.is_ground_truth ? COLORS.groundTruth : COLORS.plain;
+      const band = isPrediction(l) ? bandOf(l.confidence!) : null;
+      const color = l.ignored ? COLORS.ignored : l.is_ground_truth ? COLORS.groundTruth : band ? BAND_COLOR[band] : COLORS.plain;
       traceLine(ctx, vp, l.polygon, true);
       ctx.fillStyle = color + (l.ignored ? "14" : "1f");
       ctx.fill();
-      ctx.setLineDash(l.ignored ? [6, 4] : []);
+      ctx.setLineDash(l.ignored ? [6, 4] : band ? BAND_DASH[band] : []);
       ctx.lineWidth = l.is_ground_truth ? 2 : 1.25;
       ctx.strokeStyle = color;
       ctx.stroke();

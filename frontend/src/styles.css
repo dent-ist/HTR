@@ -689,3 +689,68 @@ kbd {
 .editor:focus {
   outline: none;
 }
+
+/* ---------------- predictions, review (M5) ---------------- */
+.notice.retrain {
+  margin: 0.6rem 0;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #2f6fdb;
+  border-radius: 6px;
+  background: #eef4ff;
+}
+.pred-label {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.badge.pred {
+  border: 1px solid var(--border);
+  background: #fff;
+}
+.conf {
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 0.85em;
+}
+.conf-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.9rem;
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+.review {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1rem 16px 3rem;
+}
+.review-card .review-crop {
+  background: #fff;
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+  overflow-x: auto;
+}
+.review-card .review-crop img {
+  display: block;
+  max-width: none;
+  height: auto;
+  min-height: 90px;
+  max-height: 260px;
+}
+.review-card .line-input {
+  width: 100%;
+  font-size: 1.25rem;
+}
+.effort-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.effort-grid figure {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.round-status {
+  margin: 0.5rem 0 0;
+}
