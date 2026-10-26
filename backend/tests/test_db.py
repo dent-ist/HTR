@@ -25,7 +25,7 @@ def columns(conn, table):
 
 
 def test_migrate_creates_schema_and_records_version(conn):
-    assert migrate(conn) == LATEST_VERSION == 4
+    assert migrate(conn) == LATEST_VERSION == 6
     assert EXPECTED_TABLES <= tables(conn)
     rows = conn.execute("SELECT version, name FROM schema_version ORDER BY version").fetchall()
     assert [(r["version"], r["name"]) for r in rows] == [
@@ -33,6 +33,8 @@ def test_migrate_creates_schema_and_records_version(conn):
         (2, "models registry and splits"),
         (3, "review events"),
         (4, "abbreviation dictionary"),
+        (5, "job error codes and hints"),
+        (6, "abbreviation suggestions"),
     ]
 
 
@@ -46,6 +48,20 @@ def test_v2_adds_model_registry_columns_and_split_tables(conn):
     assert {"cancel_requested"} <= columns(conn, "jobs")
     assert {"line_id", "split", "assigned_at"} <= columns(conn, "line_splits")
     assert {"model_id", "line_id", "split"} <= columns(conn, "model_lines")
+
+
+def test_v5_and_v6_add_job_error_details_and_the_suggestions_table(conn):
+    migrate(conn)
+    assert {"error_code", "error_hint"} <= columns(conn, "jobs")
+    assert columns(conn, "suggestions") >= {
+        "id", "written", "expansion", "rationale", "line_id", "context", "model", "status", "abbreviation_id",
+        "created_at", "resolved_at",
+    }  # fmt: skip
+    conn.execute("INSERT INTO suggestions (written, expansion, created_at) VALUES ('c/o', 'complains of', 't')")
+    with pytest.raises(sqlite3.IntegrityError):  # one row per (written, expansion): a rejection is remembered
+        conn.execute("INSERT INTO suggestions (written, expansion, created_at) VALUES ('c/o', 'complains of', 't')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO suggestions (written, expansion, status, created_at) VALUES ('a', 'b', 'x', 't')")
 
 
 def test_only_one_model_can_be_active(conn):

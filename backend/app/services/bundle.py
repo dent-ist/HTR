@@ -58,7 +58,17 @@ ACTIVE_JOBS_MESSAGE = (
 )
 
 # Tables whose row counts are recorded in the manifest and checked again on import.
-COUNTED_TABLES = ("documents", "pages", "lines", "models", "abbreviations", "review_events", "jobs", "model_lines")
+COUNTED_TABLES = (
+    "documents",
+    "pages",
+    "lines",
+    "models",
+    "abbreviations",
+    "review_events",
+    "jobs",
+    "model_lines",
+    "suggestions",
+)
 # Anything in these tables means the project is not empty (base-model rows registered at startup do not count).
 EMPTY_CHECKS = [
     ("document", "documents", "SELECT COUNT(*) FROM documents"),
@@ -68,11 +78,15 @@ EMPTY_CHECKS = [
     ("abbreviation", "abbreviations", "SELECT COUNT(*) FROM abbreviations"),
     ("review event", "review events", "SELECT COUNT(*) FROM review_events"),
     ("job", "jobs", "SELECT COUNT(*) FROM jobs"),
+    ("abbreviation suggestion", "abbreviation suggestions", "SELECT COUNT(*) FROM suggestions"),
 ]
 
 
 class BundleInvalid(Invalid):
     """The bundle is damaged, tampered with, unsafe or from a newer app (422)."""
+
+    default_code = "bundle_invalid"
+    default_hint = "Nothing was changed. Export a fresh bundle from the original project and try again."
 
 
 def _fault(point: str) -> None:  # noqa: B027

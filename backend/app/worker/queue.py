@@ -12,7 +12,7 @@ from ..errors import Conflict, NotFound
 INTERRUPTED = "interrupted: the server stopped while this job was running"
 
 # Job types whose handlers poll for a cancel request, so a *running* job of these types can be cancelled.
-COOPERATIVE_TYPES = frozenset({"train", "predict"})
+COOPERATIVE_TYPES = frozenset({"train", "predict", "suggest"})
 
 
 class JobCancelled(Exception):
@@ -31,6 +31,8 @@ def job_dict(r: sqlite3.Row) -> dict:
         "payload": json.loads(r["payload"]),
         "progress": r["progress"],
         "error": r["error"],
+        "error_code": r["error_code"],
+        "error_hint": r["error_hint"],
         "cancel_requested": bool(r["cancel_requested"]),
         "result": json.loads(r["result"]) if r["result"] else None,
         "created_at": r["created_at"],
@@ -120,10 +122,12 @@ def finish(conn: sqlite3.Connection, job_id: int, result: dict | None = None) ->
         )
 
 
-def fail(conn: sqlite3.Connection, job_id: int, error: str) -> None:
+def fail(conn: sqlite3.Connection, job_id: int, error: str, code: str | None = None, hint: str | None = None) -> None:
     with write_tx(conn):
         conn.execute(
-            "UPDATE jobs SET status = 'failed', error = ?, finished_at = ? WHERE id = ?", (error, now_iso(), job_id)
+            "UPDATE jobs SET status = 'failed', error = ?, error_code = ?, error_hint = ?, finished_at = ? "
+            "WHERE id = ?",
+            (error, code or "job_failed", hint, now_iso(), job_id),
         )
 
 
@@ -150,7 +154,8 @@ def fail_interrupted(conn: sqlite3.Connection) -> int:
     """Startup recovery: jobs still 'running' belong to a process that died. Mark them failed. Returns the count."""
     with write_tx(conn):
         cur = conn.execute(
-            "UPDATE jobs SET status = 'failed', error = ?, finished_at = ? WHERE status = 'running'",
-            (INTERRUPTED, now_iso()),
+            "UPDATE jobs SET status = 'failed', error = ?, error_code = 'interrupted', error_hint = ?, finished_at = ? "
+            "WHERE status = 'running'",
+            (INTERRUPTED, "Start the job again.", now_iso()),
         )
     return cur.rowcount

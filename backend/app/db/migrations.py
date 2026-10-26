@@ -187,11 +187,40 @@ CREATE UNIQUE INDEX idx_abbreviations_pair ON abbreviations(written, expansion);
 CREATE INDEX idx_abbreviations_written ON abbreviations(written);
 """
 
+_V5 = """
+-- M7: failed jobs carry a stable machine-readable code and a hint (what the user can do), next to the message.
+ALTER TABLE jobs ADD COLUMN error_code TEXT;
+ALTER TABLE jobs ADD COLUMN error_hint TEXT;
+"""
+
+_V6 = """
+-- M7 (optional local-LLM feature): reviewable abbreviation suggestions. A suggestion is only ever a proposal; accepting
+-- one creates a normal dictionary entry, rejecting one is remembered so the same (written, expansion) pair is not
+-- proposed again. `context` is the user's own line the suggestion was made from (kept so the user can judge it).
+CREATE TABLE suggestions (
+    id              INTEGER PRIMARY KEY,
+    written         TEXT NOT NULL,
+    expansion       TEXT NOT NULL,
+    rationale       TEXT NOT NULL DEFAULT '',
+    line_id         INTEGER REFERENCES lines(id) ON DELETE SET NULL,
+    context         TEXT NOT NULL DEFAULT '',
+    model           TEXT,
+    status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+    abbreviation_id INTEGER REFERENCES abbreviations(id) ON DELETE SET NULL,
+    created_at      TEXT NOT NULL,
+    resolved_at     TEXT,
+    UNIQUE (written, expansion)
+);
+CREATE INDEX idx_suggestions_status ON suggestions(status, written);
+"""
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "initial schema", _V1),
     Migration(2, "models registry and splits", _V2),
     Migration(3, "review events", _V3),
     Migration(4, "abbreviation dictionary", _V4),
+    Migration(5, "job error codes and hints", _V5),
+    Migration(6, "abbreviation suggestions", _V6),
 ]
 LATEST_VERSION = MIGRATIONS[-1].version
 
