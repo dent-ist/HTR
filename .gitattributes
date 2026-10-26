@@ -1,0 +1,23 @@
+# Normalize line endings: LF in the repository and in the working tree on every platform.
+* text=auto eol=lf
+
+# Binary files: never touch the bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.tif binary
+*.tiff binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.htrbundle binary
+*.mlmodel binary
+*.safetensors binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.db binary
+*.sqlite binary
