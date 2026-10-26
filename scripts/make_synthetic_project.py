@@ -8,8 +8,8 @@ any accuracy measured on them says nothing about real handwriting. Its purpose i
 Everything is written under one directory (default data/synthetic_project, gitignored). Use a throw-away server:
 
     mkdir -p data/synthetic_project/server/models
-    ln -s "$PWD/data/models/base" data/synthetic_project/server/models/base       # the pretrained model (make base-model)
-    HTR_DATA_DIR="$PWD/data/synthetic_project/server" make serve                  # own terminal; absolute path
+    ln -s "$PWD/data/models/base" data/synthetic_project/server/models/base   # the base model
+    HTR_DATA_DIR="$PWD/data/synthetic_project/server" make serve              # own terminal; absolute path
     make synthetic-project        # = scripts/make_synthetic_project.py build --pages 30 --label 170
     # then train and predict from the Training page, or POST /jobs/train and /jobs/predict (docs/api.md)
     make synthetic-report         # = scripts/make_synthetic_project.py report

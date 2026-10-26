@@ -7,11 +7,13 @@ Full spec: [docs/implementation-plan.md](docs/implementation-plan.md).
 
 ```
 backend/     uv project (Python 3.11): FastAPI app, tests, pyproject.toml + uv.lock
-frontend/    React + TypeScript + Vite app (M3): src/api (typed client), src/library, src/editor, e2e/ (Playwright)
-scripts/     check_env.py, inspect_images.py, htr.py (import/segment), review_sheet.py, make_synthetic_pages.py
-backend/app/pipeline/   measure, preprocess, segment, pagexml, overlay, workflow, review (M1 pipeline)
+frontend/    React + TypeScript + Vite app (M3): src/api (typed client), src/library, src/editor, src/training (M4), e2e/ (Playwright)
+scripts/     check_env.py, inspect_images.py, htr.py (import/segment), review_sheet.py, make_synthetic_pages.py,
+             get_base_model.py (M4: one-time base model download), make_synthetic_project.py (M4: dev proof of the loop)
+backend/app/pipeline/   measure, preprocess, segment, pagexml, overlay, workflow, review (M1 pipeline);
+                        recognize (Recognizer/Trainer interface + Kraken), train (fine-tuning), evaluate (CER/WER) (M4)
 backend/app/db/         SQLite connection + versioned migrations
-backend/app/services/   pages (import), lines (CRUD), sync (DB <-> PAGE-XML)
+backend/app/services/   pages (import), lines (CRUD), sync (DB <-> PAGE-XML), models (registry), training (split, export)
 backend/app/worker/     SQLite job queue, handlers, in-process worker thread
 backend/app/api/        FastAPI routes and request schemas
 data/        gitignored: scans, PAGE-XML, models, DB (never committed)
@@ -46,6 +48,9 @@ CUDA operation. Keep training batch sizes small enough for 4 GB.
 | `make test` | pytest (includes a guard that fails if anything under `data/` is git-tracked) |
 | `make test-kraken` | The real (unmocked) Kraken `blla` integration test, excluded from `make test` (marker `kraken`) |
 | `make fonts` | Optional one-time dev download of three OFL script fonts into `data/fonts/` for nicer synthetic test pages |
+| `make base-model` | One-time download of the pretrained recognition model into `data/models/base/` (see "M4"); the app itself never goes online |
+| `make test-train` | Opt-in tiny real fine-tune + predict with Kraken on the GPU (marker `train`; needs `make base-model` and `make fonts`; about 15 s) |
+| `make synthetic-project` / `make synthetic-report` | Dev proof of the train/predict loop on synthetic pages (see "M4") |
 | `make lint` | ruff check + ruff format --check |
 | `make format` | ruff autofix + format |
 | `make serve` | The API on `http://127.0.0.1:8000` (loopback only); docs at `/docs`. See "M2: backend API" below |
@@ -131,6 +136,141 @@ draw baseline, ignore region, undo, reload) and browser behaviour (wheel zoom at
 Alt+0, Ctrl+I, Esc revert, a PATCH forced to fail that must keep the typed text and succeed on Retry). Screenshots land in `frontend/test-results/screenshots`.
 It uses API port 8100 and web port 5173 and a temporary data dir, never `data/`.
 
+## M4: training, prediction, evaluation
+
+The loop: you transcribe lines and mark them ground truth, **fine-tune** a Kraken recognition model on them, the model
+**predicts** the lines you have not done, and **CER/WER** on a fixed set of held-out lines tells you how good it is.
+Everything runs locally; only the one-time base-model download (a dev setup step, below) goes online.
+
+Use it from the **Training** page (link in the library header, `#/training`) or the API
+([docs/api.md](docs/api.md): `POST /jobs/train`, `POST /jobs/predict`, `GET /models`, `POST /models/{id}/activate`,
+`GET /training/summary`). The page shows your ground-truth count against the recommended minimum (about 100 lines for
+the first round, then about 50 new lines per retrain) as a **non-blocking** warning, a form (epochs, batch size), live
+progress with loss and validation accuracy and a Cancel button, a Predict button with progress, the model table (date,
+start model, train and held-out lines, CER, WER, active marker, Activate) and a CER-by-round chart (inline SVG, no
+library). Training and prediction are always allowed; the only refusal is "no usable ground-truth lines" (422).
+
+### Setup: the pretrained base model (once)
+
+```
+make base-model        # downloads into data/models/base/ (gitignored), prints the model record
+```
+
+**Chosen model: "Rev City Handwritten English Base Model"** (HTRMoPo / Zenodo
+[10.5281/zenodo.19238205](https://doi.org/10.5281/zenodo.19238205), `revcity_july_2025.mlmodel`, 16 MB, **Apache-2.0**).
+Why: it is the only Kraken recognition model in the repository listing (109 records, queried with `kraken list`) that is
+*English* and *handwriting* and in Kraken's native format; it has the same network architecture as Kraken's default
+recognition model (about 4M parameters, input height 120, 118-symbol alphabet), so it fine-tunes on a 4 GB card; its
+reported CER is 6.6% on its own test data (about 95k English lines, 18th-century archival hands, trained from scratch
+with augmentation).
+
+Implications, stated plainly: it was trained on **18th-century** hands (Revolutionary City dataset), not on modern
+handwriting, so before fine-tuning it reads a modern writer poorly (about 29% CER on the synthetic script-font lines
+below, which are an easier and cleaner problem than real pages). It is a better starting point than training from
+scratch, but expect the first rounds on your real notes to be rough until you have transcribed a few hundred lines.
+Other candidates looked at: *McCATMuS* (10.5281/zenodo.13788177, CC-BY-4.0: handwritten, printed and typewritten lines
+from the 16th to the 21st century, mostly French, so a possible alternative for modern hands; not tested here:
+`uv run --project backend python scripts/get_base_model.py --doi 10.5281/zenodo.13788177 --name mccatmus`); the
+printed-English model (10.5281/zenodo.2577813) is for print; the multilingual "Party" and PP-OCR models use other
+architectures than the VGSL one this code fine-tunes. If you download another model, press Activate on it in the
+Training page (it is registered automatically the next time the models are listed).
+
+The app registers every `data/models/base/*/BASE_MODEL.json` as a `kind = "base"` row in `models` and makes the first one
+active. Without a base model, train and predict return a 422 that says to run `make base-model`.
+
+### Workflow
+
+1. Transcribe lines in the page editor (Enter marks a line as ground truth). Crossed-out or unusable lines: ignore them.
+2. Open **Training**. Read the ground-truth count and the warnings; press **Start training** (defaults: 15 epochs, batch
+   size 4, learning rate 0.0001, early stopping after 5 epochs without improvement). The job exports your lines, measures
+   the start model on the held-out lines (the "before"), fine-tunes with augmentation, keeps the best epoch, measures it
+   on the same held-out lines (the "after"), saves `data/models/<id>.mlmodel` and registers it. It becomes the active
+   model unless it is worse than its start model on the held-out lines.
+3. Press **Predict remaining lines**: every line that is not ground truth, not ignored and has no text you typed gets a
+   prediction (`text_source = "predicted"`, with a confidence), written through the same transactional PAGE-XML sync as
+   every other change. Ground truth and manual text are never overwritten, even if you edit a line while the job runs.
+   (Showing predictions in the editor and the review queue come in M5; until then they are visible through the API and
+   in the PAGE-XML.)
+4. Correct some lines, mark them ground truth, train again: the next round starts from the active model.
+
+Per round the files are `data/models/<id>.mlmodel` (the model) and `data/training/run-<job id>/` (PAGE-XML per page for
+`train/`, `val/` and `eval/`, the masked line crops with `.gt.txt` transcriptions under `lines/`, and `manifest.json`
+listing every line, its side of the split and the hyperparameters). Kraken 7.1.1 trains with PyTorch Lightning; the
+augmentation is Kraken's own `augment` option (mild warp/rotation/scale, brightness and contrast, blur, noise).
+
+### How the held-out set works
+
+A line is held out when `sha256("htr-split-v1:<line id>") mod 10000 < 1200` (about 12%). The first run with at least 8
+usable lines stores every line's side in the `line_splits` table; **a line never changes side afterwards**, so CER is
+comparable across rounds, and held-out lines are never trained on. If that leaves no held-out line, the unassigned line
+with the lowest hash is held out, so there is at least one whenever there are 8 or more usable lines; with fewer,
+nothing is held out and the run reports no CER. Choosing the best epoch and early stopping use a separate validation
+subset (about 10% of the training lines by another hash; with under 10 training lines, the training lines themselves),
+never the held-out set, so the held-out CER is not tuned on. Usable = ground truth, not ignored, non-blank text.
+
+### Metrics
+
+- **CER** = character edit distance / reference characters, exactly as stored: no case folding, no Unicode
+  normalization, whitespace counts (a missing space is an error). **WER** = word edit distance / reference words after
+  collapsing whitespace (case and punctuation still count). Both are *micro averaged* over the held-out lines (total
+  edits over total reference length) and can exceed 100%. Implemented in `backend/app/pipeline/evaluate.py`
+  (unit-tested).
+- **Reading CER**: 5% means about one wrong character in twenty. With 12-20 held-out lines (the first rounds) the number
+  is noisy: two lines can move it by several points. Compare rounds, not single numbers; the Training page shows each
+  model's CER next to the CER its start model had on the *same* lines ("was ..."). CER on synthetic fonts says nothing
+  about real handwriting, and CER on held-out lines of your own hand says little about pages written very differently.
+- **Confidence** (per predicted line, in [0, 1]) is the **geometric mean of the per-character confidences**, where a
+  character's confidence is the highest softmax probability the network gave it (Kraken's `ocr_record.confidences`). A
+  geometric mean lets one unsure character pull the line down (nine certain characters plus one coin flip score 0.93,
+  not 0.95) and is length-normalized. Greedy maxima are optimistic and the network is not calibrated: use confidence to
+  **rank** lines for review (lowest first, M5), not as the probability of a line being right. On the synthetic lines the
+  line confidence and the line CER correlate at about -0.7 (lower confidence, more errors).
+
+### Hardware notes (GTX 1050 Ti, 4 GB)
+
+The recognition network has about 4M parameters; memory is dominated by activations, which grow with line width and
+batch size. Measured on the synthetic project below with batch size 4: PyTorch peak allocation 1.3 GB; at the driver
+level the process added about 1.8 GB (allocator cache + CUDA context) on top of what the desktop already used, so keep
+other GPU applications closed while training and lower the batch size if you share the card (`batch_size` in the form,
+or `HTR_TRAIN_BATCH_SIZE`). A CUDA out-of-memory **fails the job with a clear message** ("the GPU ran out of memory at
+batch size 128. Retry with a smaller batch size (for example 64) or train on the CPU"); the server keeps running and the
+GPU memory is released (verified on the real GPU: 685 MiB in use afterwards, 597 before). Prediction halves its batch
+size on out-of-memory and finally continues on the CPU. CPU fallback: `HTR_DEVICE=cpu` (server-wide) or `device` in the
+request; training on the CPU works but is much slower. Other knobs: `HTR_TRAIN_WORKERS` (data-loader processes, default
+0) and `HTR_PREDICT_BATCH_SIZE` (default 4).
+
+### Proof of the loop on synthetic data (development only; NOT real handwriting)
+
+`scripts/make_synthetic_project.py` (see its docstring; `make synthetic-project` and `make synthetic-report`) renders 30
+pages with the three script fonts, sizes 36-60 px, ruled and unruled paper, margin notes and a vocabulary with capitals,
+digits, punctuation and abbreviations (`c/o`, `SOB`, `5mg`, ...), imports them through the API, segments them with the
+**real** Kraken segmenter, matches each segmented line to the rendered line it covers (351 rendered, 351 segmented, 350
+matched) and marks 170 random lines as ground truth with their true text. Run on the GTX 1050 Ti with default settings:
+
+| | start model (Rev City base) | after fine-tuning (15 epochs) |
+|---|---|---|
+| held-out lines (17 lines, 885 characters): CER | 28.9% | **4.0%** |
+| held-out lines: WER | 66.7% | **17.2%** |
+| the 180 never-labeled lines (true text known): CER / WER | 29.9% / 68.6% | **3.1% / 12.4%** |
+
+Training: 153 train + 15 validation lines, 15 epochs, 12.3 s per epoch (189 s in total), validation accuracy (1 - CER)
+89.8% after epoch 1 and 99.4% at the best epoch (13); peak PyTorch memory 1.3 GB. Prediction of 181 lines: 4.2 s, mean
+confidence 0.963 (base model: 0.783). Example predictions (true -> predicted, confidence): `with, who.` -> `with, wto.`
+(0.84); `Said are (also) Mrs.` -> `said are (also Mrs.` (0.84); `ok now. or, most. 40 In` -> `&t now. or, most. 4o M` (0.86);
+`make was, And it (much) Has been most. you has an (years)` -> exact (1.00). These lines come from three fonts and a
+vocabulary of about 370 word forms, which a 4M-parameter network learns quickly. **The numbers only show that the pipeline works end to
+end and that fine-tuning moves the model towards its data. They say nothing about how accurate the model will be on real
+handwriting**; that needs your own ground truth (the plan's M4 "done when" is about ~100 of your own labeled lines, a step
+that is still ahead).
+
+### Tests for M4
+
+`make test` covers CER/WER, the split (determinism, no side-switching across rounds, the at-least-one-held-out rule),
+the export, the job lifecycle with fake engines (progress, cancellation, out-of-memory, warnings, never overwriting
+ground truth, API errors, registry) and the recognizer's batching and out-of-memory logic. `make test-train` runs the
+real thing on a handful of synthetic lines (train + predict through the API, about 15 s on the GPU). `make test-frontend`
+and `make test-e2e` include the Training page.
+
 ## Inspecting a folder of scans
 
 ```
@@ -200,7 +340,7 @@ thickness grows on slightly skewed pages, so line pitch is the steadier number.)
 
 `blla` needs its default segmentation model. In kraken 7.1.1 it is `kraken/blla.mlmodel`, **shipped inside the
 kraken wheel**, so `make setup` already provides it and no `kraken get` download is needed. The model repository
-(`kraken get`) is only relevant for recognition models in M4. `make test-kraken` runs a real segmentation of a
+(`kraken get`) is only relevant for recognition models (M4, below). `make test-kraken` runs a real segmentation of a
 generated synthetic page to verify this on your machine.
 
 ### Synthetic pages (development only)
@@ -251,8 +391,8 @@ curl -s localhost:8000/pages/1                        # the page with its lines
 | `GET /lines/{id}/crop.png` | line crop (polygon bounding box of the working copy) |
 | `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/cancel` | job status, progress, errors; cancel queued jobs |
 
-Details and rules: [docs/api.md](docs/api.md). Not in M2: line split/merge (M3), predict/train endpoints (M4;
-those job types exist as stubs that fail with "not implemented until M4"), abbreviations endpoints, export.
+Details and rules: [docs/api.md](docs/api.md). Training, prediction and model endpoints arrived in M4 (below).
+Not implemented yet: abbreviations endpoints, export.
 
 ### Data layout
 
@@ -311,7 +451,8 @@ covered by tests. Training (M4) must skip `ignored` lines.
 `jobs` rows are the queue. One worker thread polls (and is woken on enqueue), claims the oldest `queued` job, runs its
 handler and records `succeeded` / `failed` (with the error message). One job at a time, because the GPU is shared.
 Handlers: `segment` (Kraken `blla` via the M1 `segment.segment_image`; replaces the page's lines; refuses to discard
-manually transcribed lines unless `force`), `predict` and `train` (stubs). Segmentation points are clamped to the page.
+manually transcribed lines unless `force`), `train` and `predict` (M4). Segmentation points are clamped to the page.
+A running `train` or `predict` job can be cancelled (cooperatively); a running `segment` job cannot.
 
 ### Tests
 

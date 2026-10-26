@@ -106,7 +106,11 @@ describe("Training page", () => {
       summary: summary({ recommended: 50, last_round: { model_id: 2, trained_at: "", train_lines: 20 }, new_since_last_round: 6 }),
     });
     render(<Training api={api} />);
-    expect(await screen.findByTestId("gt-count")).toHaveTextContent("about 50 recommended new lines per retrain");
+    expect(await screen.findByTestId("gt-count")).toHaveTextContent(
+      "24 ground-truth lines; 6 new since the last round, about 50 recommended before retraining",
+    );
+    const meter = screen.getByRole("progressbar", { name: "6 of 50 recommended new ground-truth lines" });
+    expect(meter).toHaveAttribute("value", "6");
     expect(screen.getByText(/New since the last training round: 6/)).toBeInTheDocument();
   });
 

@@ -92,6 +92,8 @@ export function Training({ api }: { api: ApiClient }) {
   const batchValue = intInRange(batch, 1, 256);
   const noModel = summary !== null && summary.active_model === null;
   const canTrain = summary !== null && summary.ground_truth_lines > 0 && !noModel;
+  // the number the recommended minimum applies to: all lines for the first round, new lines for a retrain
+  const measured = summary ? (summary.last_round ? summary.new_since_last_round : summary.ground_truth_lines) : 0;
 
   const startTraining = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -162,13 +164,15 @@ export function Training({ api }: { api: ApiClient }) {
           <h2 id="gt-heading">Ground truth</h2>
           <div className="progress-cell">
             <progress
-              value={Math.min(summary.ground_truth_lines, summary.recommended)}
+              value={Math.min(measured, summary.recommended)}
               max={summary.recommended}
-              aria-label={`${summary.ground_truth_lines} of ${summary.recommended} recommended ground-truth lines`}
+              aria-label={`${measured} of ${summary.recommended} recommended ${summary.last_round ? "new " : ""}ground-truth lines`}
             />
             <span data-testid="gt-count">
-              {summary.ground_truth_lines} ground-truth {summary.ground_truth_lines === 1 ? "line" : "lines"}, about{" "}
-              {summary.recommended} recommended {summary.last_round ? "new lines per retrain" : "for the first round"}
+              {summary.ground_truth_lines} ground-truth {summary.ground_truth_lines === 1 ? "line" : "lines"}
+              {summary.last_round
+                ? `; ${summary.new_since_last_round} new since the last round, about ${summary.recommended} recommended before retraining`
+                : `, about ${summary.recommended} recommended for the first round`}
             </span>
           </div>
           <ul className="facts small muted">

@@ -90,10 +90,30 @@ class Worker:
                 queue.fail(conn, job["id"], _describe(e))
             else:
                 queue.finish(conn, job["id"], result)
+            _release_gpu_memory()  # after the handler's frames (and any exception holding tensors) are gone
             return True
         finally:
             if own:
                 conn.close()
+
+
+def _release_gpu_memory() -> None:
+    """Hand cached CUDA memory back to the driver between jobs. After a failed job (for example a CUDA out-of-memory)
+    the exception's traceback keeps tensors alive until the except block has ended, so doing this inside the handler
+    is too early. Does nothing if torch was never imported (segmentation-only or test runs)."""
+    import sys
+
+    if "torch" not in sys.modules:
+        return
+    import gc
+
+    gc.collect()
+    try:
+        torch = sys.modules["torch"]
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        log.debug("could not release CUDA memory", exc_info=True)
 
 
 def _describe(e: Exception) -> str:
