@@ -1,67 +1,131 @@
 # HTR
 
-Local-first handwritten text recognition for one writer's scanned notes. Nothing leaves the machine.
-Full spec: [docs/implementation-plan.md](docs/implementation-plan.md).
+Local-first handwritten text recognition for one writer's scanned notes. You transcribe a few lines, the system learns
+your hand, and it predicts the rest. **Nothing leaves your machine**: the server listens on 127.0.0.1 only, makes no
+outbound connections (tested), and keeps scans, transcriptions and models in a `data/` folder that git ignores.
 
-## Layout
+Full spec and decisions: [docs/implementation-plan.md](docs/implementation-plan.md). HTTP API:
+[docs/api.md](docs/api.md).
 
+## Quick start
+
+On Windows with WSL2 (Ubuntu) and an NVIDIA driver; the complete, step-by-step version with the first-use walkthrough,
+troubleshooting and privacy notes is **[docs/setup-wsl2.md](docs/setup-wsl2.md)**.
+
+```bash
+sudo apt install -y git curl make xz-utils build-essential        # once
+git clone <repository URL> ~/HTR && cd ~/HTR                       # on the Linux filesystem, not /mnt/c
+curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
+make setup-node        # Node 22 LTS, user level
+make setup             # Python 3.11 + pinned PyTorch (CUDA 12.6) + Kraken
+make setup-frontend    # npm packages + headless Chromium for the e2e test
+make base-model        # pretrained recognition model (one-time download)
+make check             # GPU / Kraken / disk self-check
+make dev               # then open http://127.0.0.1:5173
 ```
-backend/     uv project (Python 3.11): FastAPI app, tests, pyproject.toml + uv.lock
-frontend/    React + TypeScript + Vite app (M3): src/api (typed client), src/library, src/editor, src/training (M4), e2e/ (Playwright)
-scripts/     check_env.py, inspect_images.py, htr.py (import/segment), review_sheet.py, make_synthetic_pages.py,
-             get_base_model.py (M4: one-time base model download), make_synthetic_project.py (M4: dev proof of the loop)
-backend/app/pipeline/   measure, preprocess, segment, pagexml, overlay, workflow, review (M1 pipeline);
-                        recognize (Recognizer/Trainer interface + Kraken), train (fine-tuning), evaluate (CER/WER) (M4)
-backend/app/db/         SQLite connection + versioned migrations
-backend/app/services/   pages (import), lines (CRUD), sync (DB <-> PAGE-XML), models (registry), training (split, export)
-backend/app/worker/     SQLite job queue, handlers, in-process worker thread
-backend/app/api/        FastAPI routes and request schemas
-data/        gitignored: scans, PAGE-XML, models, DB (never committed)
-docs/
-```
 
-## Setup (WSL2 Ubuntu + NVIDIA GPU)
-
-Work inside WSL2 on the Linux filesystem (e.g. `~/HTR`), not under `/mnt/c`.
-
-1. **GPU driver**: install the NVIDIA Windows driver (it provides CUDA to WSL2). `nvidia-smi` must work inside WSL.
-2. **uv**: `curl -LsSf https://astral.sh/uv/install.sh | sh`, then make sure `~/.local/bin` is on `PATH`.
-3. **Python 3.11**: `uv python install 3.11`. Do not use the system Python (Ubuntu may ship 3.14, which Kraken
-   does not support). The project pins `requires-python = ">=3.11,<3.12"` and uv uses 3.11 automatically.
-4. **Pinned install**: `make setup` (runs `uv sync --project backend --python 3.11`). Versions are pinned in
-   `backend/pyproject.toml` and locked in `backend/uv.lock`:
-   - `torch==2.9.1`, `torchvision==0.24.1` from the PyTorch **CUDA 12.6** index
-   - `kraken==7.1.1` (latest release supporting Python 3.11; requires torch >= 2.9)
-5. **Verify**: `make check`.
+Everything marked "setup" needs the network once. After that the app runs offline (`make verify-offline` proves it).
 
 GPU note: the target card is a GTX 1050 Ti (Pascal, compute capability 6.1, 4 GB VRAM). Newer PyTorch CUDA builds
 (12.8+) drop Pascal kernels, so the CUDA 12.6 wheels are used. These wheels list `sm_60` but not `sm_61` in
 `torch.cuda.get_arch_list()`; `sm_60` machine code runs on `sm_61` GPUs, and `make check` confirms this with a real
 CUDA operation. Keep training batch sizes small enough for 4 GB.
 
+## Layout
+
+```
+backend/     uv project (Python 3.11): FastAPI app, tests, pyproject.toml + uv.lock
+frontend/    React + TypeScript + Vite app: src/api (typed client), src/app (status strip, toasts, error boundary),
+             src/library, src/editor, src/training, src/review, src/abbreviations, src/export; e2e/ (Playwright)
+scripts/     check_env.py, inspect_images.py, htr.py (import/segment/bundle), review_sheet.py, get_base_model.py,
+             install_node.sh, audit_network.py + offline_smoke.py + verify_offline.sh (no-network proof),
+             make_synthetic_*.py (development only)
+backend/app/pipeline/   measure, preprocess, segment, pagexml, overlay, workflow, review (M1 pipeline);
+                        recognize (Recognizer/Trainer interface + Kraken), train (fine-tuning), evaluate (CER/WER)
+backend/app/db/         SQLite connection + versioned migrations
+backend/app/services/   pages (import), lines (CRUD), repair, sync (DB <-> PAGE-XML), models, training, review,
+                        abbreviations, suggestions (optional LLM), export, bundle
+backend/app/worker/     SQLite job queue, handlers, in-process worker thread
+backend/app/api/        FastAPI routes and request schemas
+backend/app/            web.py (Host check, error guard, request log), failures.py (error classification), health.py
+                        (self-checks), logging_setup.py, abbreviation_llm.py (optional, loopback-only)
+data/        gitignored: scans, PAGE-XML, models, DB, logs (never committed)
+docs/
+```
+
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `make setup` | Install pinned dependencies into `backend/.venv` |
-| `make check` | Environment check: WSL2, real CUDA op, GPU/compute capability, Kraken CLI, free disk. Exits non-zero on failure |
-| `make test` | pytest (includes a guard that fails if anything under `data/` is git-tracked) |
-| `make test-kraken` | The real (unmocked) Kraken `blla` integration test, excluded from `make test` (marker `kraken`) |
-| `make fonts` | Optional one-time dev download of three OFL script fonts into `data/fonts/` for nicer synthetic test pages |
-| `make base-model` | One-time download of the pretrained recognition model into `data/models/base/` (see "M4"); the app itself never goes online |
-| `make test-train` | Opt-in tiny real fine-tune + predict with Kraken on the GPU (marker `train`; needs `make base-model` and `make fonts`; about 15 s) |
-| `make synthetic-rounds` | Dev simulation of the M5 loop (rounds + scripted reviewer) on synthetic pages, see "M5" |
-| `make synthetic-project` / `make synthetic-report` | Dev proof of the train/predict loop on synthetic pages (see "M4") |
-| `make lint` | ruff check + ruff format --check |
-| `make format` | ruff autofix + format |
-| `make serve` | The API on `http://127.0.0.1:8000` (loopback only); docs at `/docs`. See "M2: backend API" below |
+| `make setup-node` | One-time: Node 22 LTS at user level (no sudo) into `~/.local/node` |
 | `make setup-frontend` | One-time: `npm ci` plus headless Chromium for the e2e test (and unpacks missing Chromium system libraries without sudo). Dev tooling downloads only |
-| `make dev-frontend` | Vite dev server on `http://127.0.0.1:5173` |
+| `make base-model` | One-time download of the pretrained recognition model into `data/models/base/` (see "M4"); the app itself never goes online |
+| `make fonts` | Optional one-time dev download of three OFL script fonts into `data/fonts/` for nicer synthetic test pages |
+| `make check` | Environment check: WSL2, real CUDA op, GPU/compute capability, Kraken CLI, free disk. Exits non-zero on failure |
 | `make dev` | API (8000) and frontend (5173) together; Ctrl+C stops both |
-| `make test-frontend` | Vitest unit and component tests |
-| `make lint-frontend` | ESLint plus strict `tsc` type check |
-| `make test-e2e` | Opt-in Playwright end-to-end test (real backend on a temp data dir, real Kraken, headless Chromium) |
+| `make serve` / `make dev-frontend` | The API alone on `http://127.0.0.1:8000` (loopback only; docs at `/docs`) / the Vite dev server alone |
+| `make test` | pytest (includes the guards that fail if anything under `data/` is git-tracked or any code reaches a non-loopback address) |
+| `make test-kraken` | The real (unmocked) Kraken `blla` integration test, excluded from `make test` (marker `kraken`) |
+| `make test-train` | Opt-in tiny real fine-tune + predict with Kraken (marker `train`; needs `make base-model` and `make fonts`; about 15 s) |
+| `make test-frontend` / `make lint-frontend` | Vitest unit and component tests / ESLint plus strict `tsc` |
+| `make test-e2e` | Opt-in Playwright end-to-end test (real backend on a temp data dir, real Kraken, headless Chromium); its temp data is deleted afterwards |
+| `make lint` / `make format` | ruff check + format check (also covers `scripts/`) / autofix + format |
+| `make verify-offline` | Static audit (no network code or external URLs in the app, frontend source and built frontend) plus the real import, segment, train, predict flow inside an offline network namespace (`unshare -rn`, loopback only). See "Privacy and the network" |
+| `make audit-network` | Only the static audit |
+| `make clean-test` | Delete temp data left by test runs (pytest base directories, e2e roots) |
+| `make synthetic-rounds` / `make synthetic-project` / `make synthetic-report` | Development proofs of the loop on synthetic pages (see "M4" and "M5") |
 | `python scripts/htr.py bundle export\|import <file>` | Project bundle from the command line, without the server (see "M6") |
+
+## Privacy and the network
+
+* The server binds `127.0.0.1` only (`make serve`, `uvicorn --host 127.0.0.1`), answers only requests whose `Host`
+  header is `127.0.0.1`, `localhost` or `[::1]` (DNS-rebinding protection; anything else gets 421), and allows CORS only
+  from `http://localhost:5173` and `http://127.0.0.1:5173`.
+* **No outbound calls.** The whole backend test suite runs with a guard that makes any connect, send or DNS lookup to a
+  non-loopback address raise and fail the test (`backend/tests/netguard.py`). `make verify-offline` adds a static audit
+  (`scripts/audit_network.py`: no `requests`/`httpx`/`urllib.request`/CDN URLs in the app, the frontend source or the
+  built frontend; only XML namespaces and loopback) and runs the real import, segment, train, predict flow in a network
+  namespace that has only a loopback interface.
+* **Setup-time downloads, and only those:** apt packages; uv, Python 3.11, PyTorch and the other wheels (`make setup`);
+  Node (`make setup-node`); npm packages and Chromium (`make setup-frontend`); the pretrained base model
+  (`make base-model`, Zenodo via HTRMoPo); optional fonts (`make fonts`, GitHub). The running app uses none of them.
+* **Logs** (`data/logs/htr.log`, rotating JSON lines) hold ids, counts, timings, status codes and error codes. Never
+  transcribed text, predictions, dictionary entries, query strings or scan file names (tested end to end).
+* **Bundles, `data/` and exports are personal data.** `data/` and `*.htrbundle` are git-ignored; keep bundles where you
+  put them on purpose.
+* The optional local-LLM abbreviation suggestions are **off by default**, talk only to a loopback server and never apply
+  anything on their own (see [docs/setup-wsl2.md](docs/setup-wsl2.md), section 10, and "M7" below).
+
+## M7: hardening
+
+* **Errors.** One format for every API error: `{detail, code, message, hint}` (see "Errors" in docs/api.md). Damaged or
+  unsupported images, missing files, a locked or full database, a missing GPU (jobs fall back to the CPU and say so)
+  and job failures all produce a plain message with a hint; no stack traces reach the browser. `GET /health/details`
+  runs the self-checks (database migrated, data folder writable, free disk, GPU/CUDA, base model, worker, local LLM);
+  the strip at the top of the UI shows the result, an offline banner with *Retry* appears when the server cannot be
+  reached, and server errors raise a toast. A crash in a screen shows a friendly page instead of a blank one.
+* **Uploads.** Single-page PNG/JPEG/TIFF only: a multi-page TIFF is refused with a hint to split it (silently
+  importing only page 1 would lose the rest); files over `HTR_MAX_UPLOAD_MB` (100) or `HTR_MAX_IMAGE_MP` (80
+  megapixels) are refused before they are decoded; identical concurrent uploads produce one page.
+* **Predictions and undo.** Lines keep `predicted_by_model_id` and `predicted_text`; undo/restore gives them back
+  exactly; merge and split produce unpredicted lines (the old prediction returns with the undo); ignoring a region
+  records `ignored` review events for the predicted lines it ignores.
+* **Local-LLM suggestions** (optional, off by default): `backend/app/abbreviation_llm.py` talks only to a loopback
+  Ollama or OpenAI-compatible server (`HTR_LLM_ENABLED`, `HTR_LLM_URL`, `HTR_LLM_API`, `HTR_LLM_MODEL`); a prompt holds
+  the abbreviation and its own line (plus at most two neighbouring lines, 300 characters each). Suggestions are stored
+  in the `suggestions` table and reviewed on the Abbreviations page (accept, edit then accept, reject; rejected pairs are
+  not suggested again); they never change a transcription. API in docs/api.md. Tested against a fake local server only;
+  no real model was run.
+* **Temp hygiene.** Passing tests delete their temp data immediately (`tmp_path_retention_policy = failed`), the e2e
+  run deletes its root, `make clean-test` removes leftovers, and everything honours `$TMPDIR`. A full `make test` peaks
+  at a fraction of the old ~2 GB and leaves nothing behind.
+* **Line endings.** `.gitattributes` sets `text=auto eol=lf`; the repository is LF everywhere.
+
+# Reference by milestone
+
+The sections below were written milestone by milestone and describe each part in detail. Where they disagree with
+[docs/setup-wsl2.md](docs/setup-wsl2.md) or [docs/api.md](docs/api.md), those two are current.
 
 ## M3: labeling UI (frontend)
 
