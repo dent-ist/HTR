@@ -164,6 +164,12 @@ def summary(conn: sqlite3.Connection) -> dict:
         "AND pages.segmented_at IS NOT NULL"
     ).fetchone()[0]
     active = conn.execute("SELECT id, name, kind, cer FROM models WHERE is_active = 1").fetchone()
+    if last is not None:
+        suggested = new_since >= RECOMMENDED_PER_RETRAIN
+        reason = f"{new_since} new ground-truth lines since the last round (about {RECOMMENDED_PER_RETRAIN} suggested)"
+    else:
+        suggested = len(ids) >= RECOMMENDED_FIRST_ROUND
+        reason = f"{len(ids)} ground-truth lines (about {RECOMMENDED_FIRST_ROUND} suggested for a first round)"
     return {
         "ground_truth_lines": len(ids),
         "held_out_lines": eval_assigned,
@@ -182,6 +188,8 @@ def summary(conn: sqlite3.Connection) -> dict:
         "predictable_lines": predictable,
         "active_model": dict(active) if active else None,
         "warnings": training_warnings(len(ids), new_since, last is not None, projected_eval > 0),
+        "retrain_suggested": suggested,
+        "retrain_reason": reason,
     }
 
 

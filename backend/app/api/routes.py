@@ -12,11 +12,12 @@ from fastapi.responses import FileResponse
 from PIL import Image
 
 from ..config import Settings
-from ..errors import Conflict, NotFound
+from ..errors import Conflict, Invalid, NotFound
 from ..services import lines as lines_svc
 from ..services import models as models_svc
 from ..services import pages as pages_svc
 from ..services import repair as repair_svc
+from ..services import review as review_svc
 from ..services import training as training_svc
 from ..worker import queue
 from .deps import get_conn, get_settings
@@ -228,6 +229,49 @@ def start_training(request: Request, conn: Conn, settings: Cfg, body: TrainReque
     job = queue.enqueue(conn, "train", payload)
     request.app.state.worker.wake()
     return {**job, "warnings": warnings}
+
+
+@router.post("/jobs/round", status_code=202, tags=["training"])
+def start_round(request: Request, conn: Conn, settings: Cfg, body: TrainRequest | None = None):
+    """One active-learning round: a train job, and when it succeeds and activates the new model, a predict job over
+    every line that is not ground truth (chained in the queue: the predict job is enqueued by the train job). Same
+    validation and `warnings` as /jobs/train. A failed or cancelled train job simply ends the round; the predict job
+    can be cancelled on its own. The train job's `result.next_job_id` names the predict job."""
+    body = body or TrainRequest()
+    models_svc.resolve_model(conn, settings, body.base_model_id)
+    warnings = training_svc.check_can_train(conn)
+    _reject_if_active(conn, "train")
+    payload = body.model_dump(exclude_none=True)
+    payload["warnings"] = warnings
+    payload["then_predict"] = True
+    job = queue.enqueue(conn, "train", payload)
+    request.app.state.worker.wake()
+    return {**job, "warnings": warnings, "round": True}
+
+
+@router.get("/review/next", tags=["review"])
+def review_next(conn: Conn, exclude: str = "", limit: int = 1):
+    """The lowest-confidence predicted lines (ties by id), skipping the comma-separated line ids in `exclude`
+    (skipping is client-side). `{items: [{line, page_id, crop_url, predicted_text, confidence, model_id}],
+    remaining}`."""
+    try:
+        ids = [int(x) for x in exclude.split(",") if x.strip()]
+    except ValueError:
+        raise Invalid("exclude must be a comma-separated list of line ids") from None
+    return review_svc.next_items(conn, ids, max(1, min(limit, 200)))
+
+
+@router.get("/review/queue", tags=["review"])
+def review_queue(conn: Conn, lowest: int = 0):
+    """Queue size, confidence histogram (10 buckets) and optionally the `lowest` N items."""
+    return review_svc.queue_overview(conn, max(0, min(lowest, 200)))
+
+
+@router.get("/review/stats", tags=["review"])
+def review_stats(conn: Conn):
+    """Correction effort per model / round: reviewed, accepted-unchanged rate, mean edits per line and per character,
+    with the model's held-out CER, oldest first."""
+    return review_svc.stats(conn)
 
 
 @router.post("/jobs/predict", status_code=202, tags=["training"])

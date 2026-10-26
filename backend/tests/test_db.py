@@ -25,10 +25,14 @@ def columns(conn, table):
 
 
 def test_migrate_creates_schema_and_records_version(conn):
-    assert migrate(conn) == LATEST_VERSION == 2
+    assert migrate(conn) == LATEST_VERSION == 3
     assert EXPECTED_TABLES <= tables(conn)
     rows = conn.execute("SELECT version, name FROM schema_version ORDER BY version").fetchall()
-    assert [(r["version"], r["name"]) for r in rows] == [(1, "initial schema"), (2, "models registry and splits")]
+    assert [(r["version"], r["name"]) for r in rows] == [
+        (1, "initial schema"),
+        (2, "models registry and splits"),
+        (3, "review events"),
+    ]
 
 
 def test_v2_adds_model_registry_columns_and_split_tables(conn):
@@ -56,7 +60,7 @@ def test_v2_migrates_an_existing_v1_database_in_place(conn):
 
     migrate(conn, MIGRATIONS[:1])
     conn.execute("INSERT INTO models (path, base_model, train_lines, cer) VALUES ('old.mlmodel', 'x', 5, 0.2)")
-    assert migrate(conn) == 2
+    assert migrate(conn) == LATEST_VERSION
     row = conn.execute("SELECT * FROM models").fetchone()
     assert (row["path"], row["cer"], row["engine"], row["kind"], row["is_active"]) == (
         "old.mlmodel",

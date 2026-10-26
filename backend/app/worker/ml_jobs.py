@@ -277,6 +277,13 @@ def train_model(ctx: JobContext) -> dict:
         "run_dir": str(export.run_dir.relative_to(s.data_dir)),
         "warnings": [*p.get("warnings", []), *([note] if note else [])],
     }
+    if p.get("then_predict"):
+        # A "round" (POST /jobs/round): predict every non-ground-truth line with the new model, queued right behind.
+        if activated:
+            nxt = queue.enqueue(conn, "predict", {"model_id": model_id, "round_job_id": ctx.job["id"]})
+            result["next_job_id"] = nxt["id"]
+        else:
+            result["warnings"].append("Round: the new model was not activated, so no prediction job was started.")
     return result
 
 
@@ -435,7 +442,9 @@ def predict_lines(ctx: JobContext) -> dict:
                 raise queue.JobCancelled(result("cancelled")) from None
             except OutOfMemory as e:
                 raise JobError(str(e)) from e
-            written = _write_predictions(ctx, page_id, [(lid, pr) for (lid, _), pr in zip(crops, preds, strict=True)])
+            written = _write_predictions(
+                ctx, page_id, [(lid, pr) for (lid, _), pr in zip(crops, preds, strict=True)], row["id"]
+            )
             counts["predicted"] += written["written"]
             counts["changed_meanwhile"] += written["skipped"]
             counts["empty"] += written["empty"]
@@ -450,7 +459,7 @@ def predict_lines(ctx: JobContext) -> dict:
     return out
 
 
-def _write_predictions(ctx: JobContext, page_id: int, preds) -> dict:
+def _write_predictions(ctx: JobContext, page_id: int, preds, model_id: int | None = None) -> dict:
     """Write one page's predictions in one transaction (DB + PAGE-XML). Only lines that are *still* eligible are
     updated: the WHERE clause is evaluated under the write lock, so a line the user transcribed or marked as ground
     truth in the meantime is left alone."""
@@ -461,9 +470,10 @@ def _write_predictions(ctx: JobContext, page_id: int, preds) -> dict:
             text = clean_prediction(pr.text)
             conf = min(1.0, max(0.0, float(pr.confidence))) if text else None
             cur = ctx.conn.execute(
-                "UPDATE lines SET text = ?, text_source = ?, confidence = ? WHERE id = ? AND is_ground_truth = 0 "
+                "UPDATE lines SET text = ?, text_source = ?, confidence = ?, predicted_by_model_id = ?, "
+                "predicted_text = ? WHERE id = ? AND is_ground_truth = 0 "
                 "AND ignored = 0 AND (text_source IS NULL OR text_source = 'predicted')",
-                (text, "predicted" if text else None, conf, line_id),
+                (text, "predicted" if text else None, conf, model_id if text else None, text or None, line_id),
             )
             if cur.rowcount:
                 written += 1

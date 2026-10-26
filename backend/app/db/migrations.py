@@ -149,7 +149,37 @@ CREATE TABLE line_splits (
 );
 """
 
-MIGRATIONS: list[Migration] = [Migration(1, "initial schema", _V1), Migration(2, "models registry and splits", _V2)]
+_V3 = """
+-- M5: which model produced a line's prediction, and the review log used to measure correction effort.
+-- predicted_by_model_id / predicted_text are set by the predict job and cleared when the line is reviewed (accepted,
+-- corrected or ignored), so a prediction produces at most one review event. predicted_text is the snapshot the user's
+-- final text is compared against even after the line's own text has been edited.
+ALTER TABLE lines ADD COLUMN predicted_by_model_id INTEGER REFERENCES models(id) ON DELETE SET NULL;
+ALTER TABLE lines ADD COLUMN predicted_text TEXT;
+CREATE INDEX idx_lines_review ON lines(confidence, id)
+    WHERE text_source = 'predicted' AND is_ground_truth = 0 AND ignored = 0;
+
+-- line_id has no foreign key: the log outlives re-segmentation and deleted lines.
+CREATE TABLE review_events (
+    id              INTEGER PRIMARY KEY,
+    line_id         INTEGER NOT NULL,
+    model_id        INTEGER REFERENCES models(id) ON DELETE SET NULL,
+    predicted_text  TEXT NOT NULL,
+    confidence      REAL,
+    final_text      TEXT,              -- NULL when the line was ignored
+    edit_distance   INTEGER,           -- characters changed between predicted_text and final_text (NULL if ignored)
+    predicted_chars INTEGER NOT NULL,
+    action          TEXT NOT NULL CHECK (action IN ('accepted', 'corrected', 'ignored')),
+    reviewed_at     TEXT NOT NULL
+);
+CREATE INDEX idx_review_events_model ON review_events(model_id);
+"""
+
+MIGRATIONS: list[Migration] = [
+    Migration(1, "initial schema", _V1),
+    Migration(2, "models registry and splits", _V2),
+    Migration(3, "review events", _V3),
+]
 LATEST_VERSION = MIGRATIONS[-1].version
 
 

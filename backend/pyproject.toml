@@ -46,6 +46,10 @@ extend-exclude = ["frontend", "data"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# fixtures are imported from test_ml_jobs and then used as parameters
+"tests/test_active_learning.py" = ["F811"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not kraken and not train'"

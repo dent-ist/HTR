@@ -8,7 +8,7 @@ from typing import Any
 from ..config import Settings
 from ..errors import Conflict, Invalid, NotFound
 from ..pipeline.segment import Line
-from . import geometry, sync
+from . import geometry, review, sync
 from .rows import json_dumps_points, json_loads, line_dict
 
 PATCHABLE = {"text", "polygon", "baseline", "ignored", "is_ground_truth", "index", "regenerate_polygon"}
@@ -128,6 +128,9 @@ def update_line(conn: sqlite3.Connection, settings: Settings, line_id: int, patc
         # the line may have been deleted since the read above
         if conn.execute("SELECT 1 FROM lines WHERE id = ?", (line_id,)).fetchone() is None:
             raise NotFound(f"line {line_id} not found")
+        review.record_if_reviewed(
+            conn, get_line_row(conn, line_id), sets.get("text"), sets.get("is_ground_truth"), sets.get("ignored")
+        )
         if sets:
             cols = ", ".join(f"{k} = ?" for k in sets)
             conn.execute(f"UPDATE lines SET {cols} WHERE id = ?", (*sets.values(), line_id))

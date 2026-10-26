@@ -24,6 +24,7 @@ def line_dict(r: sqlite3.Row) -> dict:
         "text": r["text"],
         "text_source": r["text_source"],
         "confidence": r["confidence"],
+        "predicted_by_model_id": r["predicted_by_model_id"],
         "is_ground_truth": bool(r["is_ground_truth"]),
         "ignored": bool(r["ignored"]),
         "crop_url": f"/lines/{r['id']}/crop.png",
