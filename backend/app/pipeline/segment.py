@@ -23,6 +23,12 @@ class Line:
     baseline: list[Point]
     polygon: list[Point]
     index: int = 0  # reading order, 0-based
+    # Transcription state (M2). Kraken segmentation leaves these at their defaults.
+    text: str = ""
+    text_source: str | None = None  # "manual" | "predicted" | None (no text)
+    confidence: float | None = None
+    is_ground_truth: bool = False
+    ignored: bool = False
 
 
 @dataclass

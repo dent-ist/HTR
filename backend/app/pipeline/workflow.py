@@ -56,8 +56,75 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _safe_stem(name: str) -> str:
+def safe_stem(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", Path(name).stem).strip("._") or "page"
+
+
+_safe_stem = safe_stem
+
+
+def register_original(src: Path, ws: Workspace, digest: str, source_name: str | None = None) -> dict:
+    """Copy `src` byte-for-byte into originals/ and measure it. Returns the manifest-style record (no working copy).
+
+    Raises ValueError (and leaves nothing behind) if the file is not a readable image.
+    """
+    name = source_name or src.name
+    pid = f"{safe_stem(name)}_{digest[:8]}"
+    ws.originals.mkdir(parents=True, exist_ok=True)
+    dest = ws.originals / f"{pid}{Path(name).suffix.lower()}"
+    shutil.copy2(src, dest)  # bytes untouched
+    rep = measure.inspect_image(src)
+    if rep.error:
+        dest.unlink(missing_ok=True)
+        raise ValueError(rep.error)
+    return {
+        "id": pid,
+        "source_name": name,
+        "original": str(dest.relative_to(ws.root)),
+        "sha256": digest,
+        "width": rep.width,
+        "height": rep.height,
+        "dpi": [rep.dpi_x, rep.dpi_y],
+        "line_height_px": rep.line_height_px,
+        "line_pitch_px": rep.line_pitch_px,
+        "warnings": rep.warnings,
+        "segmentation": {"status": "pending"},
+    }
+
+
+def derive_working(ws: Workspace, rec: dict, target_line_height: float, deskew: bool) -> preprocess.PreprocessInfo:
+    """Write the working copy for record `rec` and update the record (paths, measurements, warnings, notes)."""
+    pid = rec["id"]
+    orig = ws.root / rec["original"]
+    work = ws.working / f"{pid}.png"
+    info = preprocess.preprocess_file(orig, work, target_line_height, deskew)
+    rec["working"] = str(work.relative_to(ws.root))
+    rec["preprocess"] = info.to_dict()
+    rec["segmentation"] = {"status": "pending"}  # coordinates depend on the working copy
+    for p in (ws.pagexml / f"{pid}.xml", ws.overlays / f"{pid}.png"):
+        p.unlink(missing_ok=True)
+    notes = []
+    if info.rescaled:
+        notes.append(f"working copy rescaled x{info.scale:g}")
+    if info.deskewed:
+        notes.append(f"deskewed {info.skew_deg:g} deg")
+    rec["notes"] = notes
+    # One measurement for report and rescale decision: the normalized, deskewed image. (Measuring the
+    # raw original gave band heights up to 35% larger on slightly skewed pages.)
+    rep = measure.ImageReport(
+        path=rec["source_name"],
+        width=rec["width"],
+        height=rec["height"],
+        dpi_x=rec["dpi"][0],
+        dpi_y=rec["dpi"][1],
+        line_height_px=info.line_height_before,
+        line_pitch_px=info.line_pitch_before,
+        n_lines=info.n_lines,
+    )
+    rec["line_height_px"] = rep.line_height_px
+    rec["line_pitch_px"] = rep.line_pitch_px
+    rec["warnings"] = measure.image_warnings(rep)
+    return info
 
 
 def import_folder(
@@ -77,27 +144,9 @@ def import_folder(
             digest = sha256_file(src)
             pid = by_hash.get(digest)
             if pid is None:
-                pid = f"{_safe_stem(src.name)}_{digest[:8]}"
-                ws.originals.mkdir(parents=True, exist_ok=True)
-                dest = ws.originals / f"{pid}{src.suffix.lower()}"
-                shutil.copy2(src, dest)  # bytes untouched
-                rep = measure.inspect_image(src)
-                if rep.error:
-                    dest.unlink(missing_ok=True)
-                    raise ValueError(rep.error)
-                manifest[pid] = {
-                    "id": pid,
-                    "source_name": src.name,
-                    "original": str(dest.relative_to(ws.root)),
-                    "sha256": digest,
-                    "width": rep.width,
-                    "height": rep.height,
-                    "dpi": [rep.dpi_x, rep.dpi_y],
-                    "line_height_px": rep.line_height_px,
-                    "line_pitch_px": rep.line_pitch_px,
-                    "warnings": rep.warnings,
-                    "segmentation": {"status": "pending"},
-                }
+                rec = register_original(src, ws, digest)
+                pid = rec["id"]
+                manifest[pid] = rec
                 by_hash[digest] = pid
                 stats["new"] += 1
                 log(f"imported {src.name} -> {pid}")
@@ -115,36 +164,7 @@ def import_folder(
                     stats["skipped"] += 1
                     log(f"skip {src.name} (already imported as {pid})")
             if needs_working:
-                rec = manifest[pid]
-                orig = ws.root / rec["original"]
-                work = ws.working / f"{pid}.png"
-                info = preprocess.preprocess_file(orig, work, target_line_height, deskew)
-                rec["working"] = str(work.relative_to(ws.root))
-                rec["preprocess"] = info.to_dict()
-                rec["segmentation"] = {"status": "pending"}  # coordinates depend on the working copy
-                for p in (ws.pagexml / f"{pid}.xml", ws.overlays / f"{pid}.png"):
-                    p.unlink(missing_ok=True)
-                notes = []
-                if info.rescaled:
-                    notes.append(f"working copy rescaled x{info.scale:g}")
-                if info.deskewed:
-                    notes.append(f"deskewed {info.skew_deg:g} deg")
-                rec["notes"] = notes
-                # One measurement for report and rescale decision: the normalized, deskewed image. (Measuring the
-                # raw original gave band heights up to 35% larger on slightly skewed pages.)
-                rep = measure.ImageReport(
-                    path=rec["source_name"],
-                    width=rec["width"],
-                    height=rec["height"],
-                    dpi_x=rec["dpi"][0],
-                    dpi_y=rec["dpi"][1],
-                    line_height_px=info.line_height_before,
-                    line_pitch_px=info.line_pitch_before,
-                    n_lines=info.n_lines,
-                )
-                rec["line_height_px"] = rep.line_height_px
-                rec["line_pitch_px"] = rep.line_pitch_px
-                rec["warnings"] = measure.image_warnings(rep)
+                derive_working(ws, manifest[pid], target_line_height, deskew)
         except Exception as e:  # noqa: BLE001  one bad file must not abort the batch
             stats["failed"] += 1
             log(f"FAILED {src.name}: {type(e).__name__}: {e}")
@@ -233,4 +253,12 @@ def segment_pages(
     return stats
 
 
-__all__ = ["Workspace", "import_folder", "segment_pages", "sha256_file"]
+__all__ = [
+    "Workspace",
+    "derive_working",
+    "import_folder",
+    "register_original",
+    "safe_stem",
+    "segment_pages",
+    "sha256_file",
+]
