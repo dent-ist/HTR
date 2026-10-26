@@ -97,4 +97,9 @@ describe("Library", () => {
     render(<Library api={api} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Cannot reach the API");
   });
+
+  it("links to the training page", async () => {
+    render(<Library api={setup()} />);
+    expect(await screen.findByRole("link", { name: "Training" })).toHaveAttribute("href", "#/training");
+  });
 });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, type ApiClient } from "../api/client";
 import type { Document, Job, Page } from "../api/types";
-import { pageHash } from "../router";
+import { pageHash, TRAINING_HASH } from "../router";
 import { jobIsActive, jobLabel, progressOf, statusLabel } from "./format";
 
 const POLL_MS = 1000;
@@ -140,6 +140,9 @@ export function Library({ api }: { api: ApiClient }) {
     <main className="library">
       <header className="library-head">
         <h1>HTR library</h1>
+        <a className="button" href={TRAINING_HASH}>
+          Training
+        </a>
         <form onSubmit={createDoc} className="new-doc">
           <label>
             New document name

@@ -112,4 +112,30 @@ describe("ApiClient", () => {
       ["DELETE", "/lines/9", null],
     ]);
   });
+
+  it("calls the training endpoints with the documented bodies", async () => {
+    const { api, spy } = client(() => jsonResponse({ id: 1, warnings: [] }, 202));
+    await api.startTraining({ epochs: 5, batch_size: 2 });
+    await api.startTraining();
+    await api.startPrediction({ model_id: 3, page_ids: [1, 2] });
+    await api.cancelJob(7);
+    await api.getTrainingSummary();
+    await api.listModels();
+    await api.activateModel(4);
+    const calls = spy.mock.calls.map(([url, init]) => [init?.method, String(url).replace("http://api.test", ""), init?.body ? JSON.parse(String(init.body)) : null]);
+    expect(calls).toEqual([
+      ["POST", "/jobs/train", { epochs: 5, batch_size: 2 }],
+      ["POST", "/jobs/train", {}],
+      ["POST", "/jobs/predict", { model_id: 3, page_ids: [1, 2] }],
+      ["POST", "/jobs/7/cancel", null],
+      ["GET", "/training/summary", null],
+      ["GET", "/models", null],
+      ["POST", "/models/4/activate", null],
+    ]);
+  });
+
+  it("surfaces a 422 from /jobs/train as an ApiError", async () => {
+    const { api } = client(() => jsonResponse({ detail: "there are no usable ground-truth lines to train on" }, 422));
+    await expect(api.startTraining()).rejects.toMatchObject({ status: 422, message: /no usable ground-truth/ });
+  });
 });

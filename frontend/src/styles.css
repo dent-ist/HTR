@@ -228,6 +228,177 @@ progress {
   color: var(--muted);
 }
 
+/* ---------------- training ---------------- */
+.training {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1rem 16px 3rem;
+}
+.training-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.training-head h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+.panel {
+  margin-top: 1rem;
+  padding: 0.8rem 1rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.panel h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+.facts {
+  margin: 0.5rem 0;
+  padding-left: 1.2rem;
+}
+.warnings {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+}
+.warnings li {
+  margin: 0.3rem 0;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid #d9a400;
+  border-radius: 6px;
+  background: #fff7dd;
+  color: var(--warn);
+}
+.train-form {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.train-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  gap: 0.15rem;
+}
+.train-form input {
+  font: inherit;
+  width: 7rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.train-form input[aria-invalid="true"] {
+  border-color: var(--err);
+}
+.training .job {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  align-items: flex-start;
+  margin-top: 0.7rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}
+.training progress {
+  width: min(100%, 360px);
+}
+table.models {
+  width: 100%;
+  border-collapse: collapse;
+}
+.models th,
+.models td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.models thead th {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.models tbody th {
+  font-weight: 600;
+}
+.models tr.active-model {
+  background: #eef4ff;
+}
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.cer-chart {
+  margin: 0;
+}
+.cer-chart svg {
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+}
+.cer-chart .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.cer-chart .tick,
+.cer-chart .value {
+  font-size: 11px;
+  fill: var(--muted);
+}
+.cer-chart .value {
+  fill: var(--text);
+}
+.cer-chart .series {
+  stroke-width: 2;
+}
+.cer-chart .series.after,
+.cer-chart .marker.after {
+  stroke: var(--accent);
+  fill: var(--accent);
+}
+.cer-chart .series.after {
+  fill: none;
+}
+.cer-chart .series.before,
+.cer-chart .marker.before {
+  stroke: var(--muted);
+  fill: #fff;
+  stroke-width: 2;
+}
+.cer-chart .series.before {
+  stroke-dasharray: 6 4;
+  fill: none;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  align-items: center;
+  color: var(--muted);
+}
+.swatch {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 3px solid var(--accent);
+  margin-right: 0.3rem;
+  vertical-align: middle;
+}
+.swatch.before {
+  border-top: 3px dashed var(--muted);
+}
+
 /* ---------------- editor ---------------- */
 .editor {
   height: 100%;

@@ -6,12 +6,17 @@ import type {
   Line,
   LinePatch,
   MergeResult,
+  Model,
   Page,
   PageDetail,
   PageStatus,
   Point,
+  PredictOptions,
   Rect,
   SplitResult,
+  StartedJob,
+  TrainOptions,
+  TrainingSummary,
   UploadResult,
 } from "./types";
 
@@ -165,5 +170,24 @@ export class ApiClient {
     if (filter.limit) q.set("limit", String(filter.limit));
     const qs = q.toString();
     return this.request("GET", "/jobs" + (qs ? `?${qs}` : ""));
+  }
+  cancelJob(id: number): Promise<Job> {
+    return this.request("POST", `/jobs/${id}/cancel`);
+  }
+  getTrainingSummary(): Promise<TrainingSummary> {
+    return this.request("GET", "/training/summary");
+  }
+  listModels(): Promise<Model[]> {
+    return this.request("GET", "/models");
+  }
+  activateModel(id: number): Promise<Model> {
+    return this.request("POST", `/models/${id}/activate`);
+  }
+  /** Enqueue a fine-tune job. The response carries non-blocking `warnings`. */
+  startTraining(options: TrainOptions = {}): Promise<StartedJob> {
+    return this.request("POST", "/jobs/train", { json: options });
+  }
+  startPrediction(options: PredictOptions = {}): Promise<StartedJob> {
+    return this.request("POST", "/jobs/predict", { json: options });
   }
 }

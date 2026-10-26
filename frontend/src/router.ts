@@ -1,9 +1,13 @@
-// Tiny hash router: "#/" is the library, "#/pages/<id>" the page editor. No dependency needed for two screens.
+// Tiny hash router: "#/" is the library, "#/pages/<id>" the page editor, "#/training" the training page.
+// No dependency needed for three screens.
 import { useEffect, useState } from "react";
 
-export type Route = { name: "library" } | { name: "page"; id: number };
+export type Route = { name: "library" } | { name: "page"; id: number } | { name: "training" };
+
+export const TRAINING_HASH = "#/training";
 
 export function parseHash(hash: string): Route {
+  if (/^#\/training\/?$/.test(hash)) return { name: "training" };
   const m = /^#\/pages\/(\d+)\/?$/.exec(hash);
   return m ? { name: "page", id: Number(m[1]) } : { name: "library" };
 }
