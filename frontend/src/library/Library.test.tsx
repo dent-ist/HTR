@@ -20,6 +20,7 @@ const page: Page = {
   original_url: "/pages/7/original",
   line_count: 0,
   ground_truth_count: 0,
+  active_ground_truth_count: 0,
   ignored_count: 0,
 };
 const job = (over: Partial<Job>): Job => ({
@@ -47,8 +48,8 @@ function setup(pages: Page[] = [page]) {
 describe("Library", () => {
   it("lists documents, pages, status and progress", async () => {
     const api = setup([
-      { ...page, status: "partially_transcribed", line_count: 10, ground_truth_count: 4, ignored_count: 2 },
-      { ...page, id: 8, original_filename: "scan2.png", status: "done", line_count: 3, ground_truth_count: 3 },
+      { ...page, status: "partially_transcribed", line_count: 10, ground_truth_count: 5, active_ground_truth_count: 4, ignored_count: 2 },
+      { ...page, id: 8, original_filename: "scan2.png", status: "done", line_count: 3, ground_truth_count: 3, active_ground_truth_count: 3 },
     ]);
     render(<Library api={api} />);
     expect(await screen.findByText("Notebook")).toBeInTheDocument();

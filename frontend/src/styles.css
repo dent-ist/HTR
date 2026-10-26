@@ -447,3 +447,72 @@ kbd {
     display: none;
   }
 }
+
+/* ---------------- repair toolbar and modes ---------------- */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.3rem 0.8rem;
+  background: #f0f2f6;
+  border-bottom: 1px solid var(--border);
+}
+.toolbar button {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.88rem;
+}
+.toolbar button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.toolbar .sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 0 0.3rem;
+}
+.mode-banner {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.2rem 0.8rem;
+  font-size: 0.88rem;
+  background: #eef1f6;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.mode-banner.mode-merge,
+.mode-banner.mode-split,
+.mode-banner.mode-baseline,
+.mode-banner.mode-region {
+  background: #fde7ef;
+  color: #7a0b33;
+  border-bottom-color: #d81b60;
+  border-bottom-width: 2px;
+}
+.mode-banner strong {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.mode-banner button {
+  margin-left: auto;
+  padding: 0.1rem 0.6rem;
+}
+.canvas-wrap.mode-merge .page-canvas,
+.canvas-wrap.mode-split .page-canvas,
+.canvas-wrap.mode-baseline .page-canvas,
+.canvas-wrap.mode-region .page-canvas {
+  cursor: crosshair;
+  outline: 3px solid #d81b60;
+  outline-offset: -3px;
+}
+.banner.info {
+  color: var(--text);
+  background: #eaf1fd;
+  border-color: #aac4f2;
+}
+.editor:focus {
+  outline: none;
+}

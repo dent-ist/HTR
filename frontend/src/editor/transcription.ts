@@ -40,7 +40,9 @@ export type EditorAction =
   | { type: "dispatched"; reqId: number }
   | { type: "saveOk"; reqId: number; line: Line }
   | { type: "saveFail"; reqId: number; message: string }
-  | { type: "dismissError"; lineId: number };
+  | { type: "dismissError"; lineId: number }
+  /** New server truth after a repair operation; keeps drafts and errors of lines that still exist. */
+  | { type: "replaceLines"; lines: Line[]; selectId?: number | null };
 
 export const initialState: EditorState = {
   lines: [],
@@ -215,6 +217,19 @@ export function reducer(s: EditorState, a: EditorAction): EditorState {
     }
     case "dismissError":
       return { ...s, errors: without(s.errors, a.lineId) };
+    case "replaceLines": {
+      const byId = new Map(a.lines.map((l) => [l.id, l]));
+      const drafts: Record<number, string> = {};
+      for (const [id, text] of Object.entries(s.drafts)) {
+        const l = byId.get(Number(id));
+        if (l && text !== savedText(l)) drafts[Number(id)] = text;
+      }
+      const errors: Record<number, string> = {};
+      for (const [id, msg] of Object.entries(s.errors)) if (byId.has(Number(id))) errors[Number(id)] = msg;
+      const wanted = a.selectId === undefined ? s.selectedId : a.selectId;
+      const selectedId = wanted !== null && byId.has(wanted) ? wanted : initialSelection(a.lines);
+      return { ...s, lines: a.lines, drafts, errors, selectedId, notice: null };
+    }
   }
 }
 
@@ -227,13 +242,29 @@ export interface KeyInfo {
   shiftKey: boolean;
   altKey: boolean;
   isComposing?: boolean;
+  /** Physical key (KeyboardEvent.code); Alt+letter shortcuts use it because Alt changes `key` on some layouts. */
+  code?: string;
 }
 
 export type UiCommand = "help" | "nextPage" | "prevPage" | "fitWidth" | "closeOverlay";
 
+/** Segmentation repair commands (executed by the page editor, see modes.ts and useRepair.ts). */
+export type RepairCommand =
+  | "mode:merge"
+  | "mode:split"
+  | "mode:baseline"
+  | "mode:redraw"
+  | "mode:region"
+  | "mergeNext"
+  | "deleteLine"
+  | "moveUp"
+  | "moveDown"
+  | "undo";
+
 export type KeyResult =
   | { kind: "editor"; action: EditorAction }
   | { kind: "ui"; command: UiCommand }
+  | { kind: "repair"; command: RepairCommand }
   | null;
 
 /** The documented shortcuts; also rendered by the help overlay so docs and behaviour cannot drift. */
@@ -242,6 +273,16 @@ export const SHORTCUTS: { keys: string; what: string }[] = [
   { keys: "Tab / Shift+Tab", what: "Next / previous line (any line, without saving; typed text is kept)" },
   { keys: "Esc", what: "Revert unsaved edits on the current line (closes this help if open)" },
   { keys: "Ctrl+I", what: "Ignore / un-ignore the current line" },
+  { keys: "Alt+M  (or M)", what: "Merge mode: click lines to add/remove, Enter merges, Esc cancels" },
+  { keys: "Alt+J  (or J)", what: "Merge the current line with the next one right away" },
+  { keys: "Alt+S  (or S)", what: "Split mode: click a point on a line, click it again or Enter to cut" },
+  { keys: "Alt+B  (or B)", what: "Draw a baseline for a missed line: click points, Enter finishes, Backspace removes a point" },
+  { keys: "Alt+Shift+B  (or Shift+B)", what: "Redraw the baseline of the selected line" },
+  { keys: "Alt+R  (or R)", what: "Ignore region: drag a rectangle over lines to ignore" },
+  { keys: "Alt+Delete / Alt+Backspace  (or Delete)", what: "Delete the current line (Ctrl+Z restores it)" },
+  { keys: "Alt+Up / Alt+Down", what: "Move the current line up / down in reading order" },
+  { keys: "Ctrl+Z  (Alt+Z anywhere)", what: "Undo the last repair (not while the text box has unsaved edits: then it undoes typing)" },
+  { keys: "Esc in a mode", what: "Cancel the mode and return to Select" },
   { keys: "Alt+PageDown / Alt+PageUp", what: "Next / previous page" },
   { keys: "Alt+0", what: "Fit page to width" },
   { keys: "Ctrl+/ , F1, or ? outside the text box", what: "Show / hide this help" },
@@ -250,7 +291,32 @@ export const SHORTCUTS: { keys: string; what: string }[] = [
   { keys: "Click a line", what: "Select it" },
 ];
 
-export function keyToAction(e: KeyInfo, ctx: { inTextField: boolean; overlayOpen?: boolean }): KeyResult {
+const ALT_REPAIR: Record<string, RepairCommand> = {
+  KeyM: "mode:merge",
+  KeyJ: "mergeNext",
+  KeyS: "mode:split",
+  KeyB: "mode:baseline",
+  KeyR: "mode:region",
+  Delete: "deleteLine",
+  Backspace: "deleteLine",
+  ArrowUp: "moveUp",
+  ArrowDown: "moveDown",
+  KeyZ: "undo",
+};
+const PLAIN_REPAIR: Record<string, RepairCommand> = {
+  m: "mode:merge",
+  j: "mergeNext",
+  s: "mode:split",
+  b: "mode:baseline",
+  B: "mode:redraw",
+  r: "mode:region",
+  Delete: "deleteLine",
+};
+
+export function keyToAction(
+  e: KeyInfo,
+  ctx: { inTextField: boolean; overlayOpen?: boolean; hasDraft?: boolean },
+): KeyResult {
   if (e.isComposing) return null; // IME in progress: Enter confirms the composition, not the line
   const mod = e.ctrlKey || e.metaKey;
   const plain = !mod && !e.altKey;
@@ -264,6 +330,18 @@ export function keyToAction(e: KeyInfo, ctx: { inTextField: boolean; overlayOpen
   if (e.altKey && !mod && key === "PageDown") return { kind: "ui", command: "nextPage" };
   if (e.altKey && !mod && key === "PageUp") return { kind: "ui", command: "prevPage" };
   if (e.altKey && !mod && key === "0") return { kind: "ui", command: "fitWidth" };
+  if (e.altKey && !mod && e.code) {
+    const cmd = e.code === "KeyB" && e.shiftKey ? "mode:redraw" : ALT_REPAIR[e.code];
+    if (cmd) return { kind: "repair", command: cmd };
+  }
+  // Ctrl+Z is the browser's text undo while there are unsaved edits in the box; otherwise it undoes a repair.
+  if (mod && !e.altKey && !e.shiftKey && key.toLowerCase() === "z" && !(ctx.inTextField && ctx.hasDraft)) {
+    return { kind: "repair", command: "undo" };
+  }
+  if (!ctx.inTextField && !mod && !e.altKey) {
+    const cmd = PLAIN_REPAIR[key];
+    if (cmd) return { kind: "repair", command: cmd };
+  }
   if (mod && key === "/") return { kind: "ui", command: "help" };
   if (key === "F1") return { kind: "ui", command: "help" };
   if (!ctx.inTextField && plain && key === "?") return { kind: "ui", command: "help" };

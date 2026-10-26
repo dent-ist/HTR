@@ -45,6 +45,7 @@ function mkPage(lines: Line[]): PageDetail {
     original_url: "/pages/1/original",
     line_count: lines.length,
     ground_truth_count: 0,
+    active_ground_truth_count: 0,
     ignored_count: 0,
     lines,
   };

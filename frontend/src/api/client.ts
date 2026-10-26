@@ -1,4 +1,19 @@
-import type { Document, Job, JobStatus, Line, LinePatch, Page, PageDetail, PageStatus, UploadResult } from "./types";
+import type {
+  Document,
+  IgnoreRegionResult,
+  Job,
+  JobStatus,
+  Line,
+  LinePatch,
+  MergeResult,
+  Page,
+  PageDetail,
+  PageStatus,
+  Point,
+  Rect,
+  SplitResult,
+  UploadResult,
+} from "./types";
 
 export const DEFAULT_API_BASE = "http://127.0.0.1:8000";
 
@@ -103,6 +118,42 @@ export class ApiClient {
   }
   patchLine(id: number, patch: LinePatch): Promise<Line> {
     return this.request("PATCH", `/lines/${id}`, { json: patch });
+  }
+  deleteLine(id: number): Promise<void> {
+    return this.request("DELETE", `/lines/${id}`);
+  }
+  /** Add a missed line from a baseline only; the server builds the polygon. */
+  addLine(pageId: number, baseline: Point[]): Promise<Line> {
+    return this.request("POST", `/pages/${pageId}/lines`, { json: { baseline } });
+  }
+  redrawBaseline(id: number, baseline: Point[]): Promise<Line> {
+    return this.patchLine(id, { baseline, regenerate_polygon: true });
+  }
+  mergeLines(lineIds: number[]): Promise<MergeResult> {
+    return this.request("POST", "/lines/merge", { json: { line_ids: lineIds } });
+  }
+  splitLine(id: number, x: number, y: number): Promise<SplitResult> {
+    return this.request("POST", `/lines/${id}/split`, { json: { x, y } });
+  }
+  ignoreRegion(pageId: number, rect: Rect): Promise<IgnoreRegionResult> {
+    return this.request("POST", `/pages/${pageId}/ignore-region`, { json: rect });
+  }
+  reorder(pageId: number, lineIds: number[]): Promise<PageDetail> {
+    return this.request("POST", `/pages/${pageId}/reorder`, { json: { line_ids: lineIds } });
+  }
+  /** Undo primitive: replace the page's lines with a snapshot. 409 if that would drop typed text and !force. */
+  restore(pageId: number, lines: Line[], force = false): Promise<PageDetail> {
+    const snapshot = lines.map((l) => ({
+      id: l.id,
+      baseline: l.baseline,
+      polygon: l.polygon,
+      text: l.text ?? "",
+      text_source: l.text ? l.text_source : null,
+      confidence: l.confidence,
+      is_ground_truth: l.is_ground_truth,
+      ignored: l.ignored,
+    }));
+    return this.request("POST", `/pages/${pageId}/restore`, { json: { lines: snapshot, force } });
   }
   getJob(id: number): Promise<Job> {
     return this.request("GET", `/jobs/${id}`);

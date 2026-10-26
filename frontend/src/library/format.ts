@@ -20,8 +20,6 @@ export function jobLabel(j: Job): string {
 }
 
 /** Active (non-ignored) lines and how many of them are ground truth. */
-export function progressOf(p: Pick<Page, "line_count" | "ignored_count" | "ground_truth_count">): { done: number; total: number } {
-  // ground_truth_count also counts ground-truth lines that were later ignored, so clamp to the active total.
-  const total = Math.max(0, p.line_count - p.ignored_count);
-  return { done: Math.min(p.ground_truth_count, total), total };
+export function progressOf(p: Pick<Page, "line_count" | "ignored_count" | "active_ground_truth_count">): { done: number; total: number } {
+  return { done: p.active_ground_truth_count, total: Math.max(0, p.line_count - p.ignored_count) };
 }

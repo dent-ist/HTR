@@ -39,6 +39,8 @@ export interface Page {
   original_url: string;
   line_count: number;
   ground_truth_count: number;
+  /** Ground-truth lines that are not ignored (use for progress). */
+  active_ground_truth_count: number;
   ignored_count: number;
 }
 
@@ -71,4 +73,31 @@ export interface LinePatch {
   index?: number;
   polygon?: Point[];
   baseline?: Point[];
+  /** With a baseline: let the server rebuild the polygon from it (redraw baseline). */
+  regenerate_polygon?: boolean;
+}
+
+export interface MergeResult {
+  line: Line;
+  removed_ids: number[];
+  page: PageDetail;
+}
+
+export interface SplitResult {
+  lines: [Line, Line];
+  /** Text of the line before it was cut (both halves start empty). */
+  old_text: string;
+  page: PageDetail;
+}
+
+export interface IgnoreRegionResult {
+  affected: number[];
+  page: PageDetail;
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }

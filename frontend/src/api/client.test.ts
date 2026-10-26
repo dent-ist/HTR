@@ -85,4 +85,31 @@ describe("ApiClient", () => {
     const { api } = client(() => new Response("boom", { status: 500 }));
     await expect(api.getJob(1)).rejects.toMatchObject({ status: 500, message: "HTTP 500" });
   });
+
+  it("calls the repair endpoints with the documented bodies", async () => {
+    const { api, spy } = client(() => jsonResponse({}));
+    await api.mergeLines([1, 2]);
+    await api.splitLine(5, 120, 40);
+    await api.addLine(3, [[1, 2], [3, 4]]);
+    await api.redrawBaseline(8, [[1, 2], [3, 4]]);
+    await api.ignoreRegion(3, { x: 1, y: 2, w: 3, h: 4 });
+    await api.reorder(3, [2, 1]);
+    await api.restore(3, [{ id: 1, baseline: [[0, 0], [1, 1]], polygon: [[0, 0], [1, 0], [1, 1]], text: null, text_source: null, confidence: null, is_ground_truth: false, ignored: false, page_id: 3, index: 0, crop_url: "" }], true);
+    await api.deleteLine(9);
+    const calls = spy.mock.calls.map(([url, init]) => [init?.method, String(url).replace("http://api.test", ""), init?.body ? JSON.parse(String(init.body)) : null]);
+    expect(calls).toEqual([
+      ["POST", "/lines/merge", { line_ids: [1, 2] }],
+      ["POST", "/lines/5/split", { x: 120, y: 40 }],
+      ["POST", "/pages/3/lines", { baseline: [[1, 2], [3, 4]] }],
+      ["PATCH", "/lines/8", { baseline: [[1, 2], [3, 4]], regenerate_polygon: true }],
+      ["POST", "/pages/3/ignore-region", { x: 1, y: 2, w: 3, h: 4 }],
+      ["POST", "/pages/3/reorder", { line_ids: [2, 1] }],
+      [
+        "POST",
+        "/pages/3/restore",
+        { force: true, lines: [{ id: 1, baseline: [[0, 0], [1, 1]], polygon: [[0, 0], [1, 0], [1, 1]], text: "", text_source: null, confidence: null, is_ground_truth: false, ignored: false }] },
+      ],
+      ["DELETE", "/lines/9", null],
+    ]);
+  });
 });
