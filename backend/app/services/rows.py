@@ -56,5 +56,6 @@ def page_dict(r: sqlite3.Row) -> dict:
     if "line_count" in keys:
         d["line_count"] = r["line_count"]
         d["ground_truth_count"] = r["ground_truth_count"]
+        d["active_ground_truth_count"] = r["active_ground_truth_count"]
         d["ignored_count"] = r["ignored_count"]
     return d

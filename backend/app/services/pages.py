@@ -21,6 +21,8 @@ ALLOWED = {".png": {"PNG"}, ".jpg": {"JPEG"}, ".jpeg": {"JPEG"}, ".tif": {"TIFF"
 
 PAGE_SELECT = (
     "SELECT p.*, COUNT(l.id) AS line_count, COALESCE(SUM(l.is_ground_truth), 0) AS ground_truth_count, "
+    "COALESCE(SUM(CASE WHEN l.is_ground_truth = 1 AND l.ignored = 0 THEN 1 ELSE 0 END), 0) "
+    "AS active_ground_truth_count, "
     "COALESCE(SUM(l.ignored), 0) AS ignored_count FROM pages p LEFT JOIN lines l ON l.page_id = p.id"
 )
 

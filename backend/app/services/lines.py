@@ -8,10 +8,10 @@ from typing import Any
 from ..config import Settings
 from ..errors import Conflict, Invalid, NotFound
 from ..pipeline.segment import Line
-from . import sync
-from .rows import json_dumps_points, line_dict
+from . import geometry, sync
+from .rows import json_dumps_points, json_loads, line_dict
 
-PATCHABLE = {"text", "polygon", "baseline", "ignored", "is_ground_truth", "index"}
+PATCHABLE = {"text", "polygon", "baseline", "ignored", "is_ground_truth", "index", "regenerate_polygon"}
 
 
 def get_line_row(conn: sqlite3.Connection, line_id: int) -> sqlite3.Row:
@@ -55,6 +55,25 @@ def check_points(points: Any, name: str, minimum: int, size: tuple[int, int]) ->
     return out
 
 
+def generate_polygon(
+    conn: sqlite3.Connection, page_id: int, baseline: list[tuple[int, int]], exclude_line_id: int | None = None
+) -> list[tuple[int, int]]:
+    """Polygon for a baseline using the page's median ascent/descent (fallback: the page's measured line height)."""
+    page = conn.execute("SELECT width, height, line_height_px FROM pages WHERE id = ?", (page_id,)).fetchone()
+    if page is None:
+        raise NotFound(f"page {page_id} not found")
+    size = (page["width"], page["height"])
+    others = [
+        (json_loads(r["baseline"]), json_loads(r["polygon"]))
+        for r in conn.execute("SELECT id, baseline, polygon FROM lines WHERE page_id = ?", (page_id,))
+        if r["id"] != exclude_line_id
+    ]
+    asc, desc = geometry.typical_extent(
+        [([tuple(p) for p in b], [tuple(p) for p in pg]) for b, pg in others], size, page["line_height_px"]
+    )
+    return geometry.polygon_from_baseline(baseline, asc, desc, size)
+
+
 def _renumber(conn: sqlite3.Connection, ordered_ids: list[int]) -> None:
     for i, lid in enumerate(ordered_ids):
         conn.execute('UPDATE lines SET "index" = ? WHERE id = ? AND "index" != ?', (i, lid, i))
@@ -82,10 +101,21 @@ def update_line(conn: sqlite3.Connection, settings: Settings, line_id: int, patc
     if "text" in patch:
         text = patch["text"]
         sets.update(text=text, text_source="manual" if text else None, confidence=None)
+    regenerate = bool(patch.get("regenerate_polygon"))
+    if regenerate and "polygon" in patch:
+        raise Invalid("give either polygon or regenerate_polygon, not both")
     if "polygon" in patch:
         sets["polygon"] = json_dumps_points(check_points(patch["polygon"], "polygon", 3, size))
     if "baseline" in patch:
         sets["baseline"] = json_dumps_points(check_points(patch["baseline"], "baseline", 2, size))
+    if regenerate:
+        base = (
+            geometry.orient_left_to_right(check_points(patch["baseline"], "baseline", 2, size))
+            if "baseline" in patch
+            else [tuple(p) for p in json_loads(cur["baseline"])]
+        )
+        sets["baseline"] = json_dumps_points(base)
+        sets["polygon"] = json_dumps_points(generate_polygon(conn, page_id, base, exclude_line_id=line_id))
     if "ignored" in patch:
         sets["ignored"] = int(bool(patch["ignored"]))
     if "is_ground_truth" in patch:
@@ -120,7 +150,8 @@ def delete_line(conn: sqlite3.Connection, settings: Settings, line_id: int) -> N
 
 
 def add_line(conn: sqlite3.Connection, settings: Settings, page_id: int, data: dict[str, Any]) -> dict:
-    """Add a line to a segmented page. Keys: baseline, polygon (required), text, ignored, index (default: append)."""
+    """Add a line to a segmented page. Keys: baseline (required), polygon (generated from the baseline when absent),
+    text, ignored, index (default: append)."""
     page = conn.execute("SELECT segmented_at FROM pages WHERE id = ?", (page_id,)).fetchone()
     if page is None:
         raise NotFound(f"page {page_id} not found")
@@ -128,7 +159,12 @@ def add_line(conn: sqlite3.Connection, settings: Settings, page_id: int, data: d
         raise Conflict("page has not been segmented yet")
     size = _page_size(conn, page_id)
     baseline = check_points(data.get("baseline"), "baseline", 2, size)
-    polygon = check_points(data.get("polygon"), "polygon", 3, size)
+    polygon = None
+    if data.get("polygon") is not None:
+        polygon = check_points(data["polygon"], "polygon", 3, size)
+    else:
+        baseline = geometry.orient_left_to_right(baseline)
+        polygon = generate_polygon(conn, page_id, baseline)
     text = data.get("text") or ""
     with sync.page_transaction(conn, settings, page_id):
         ids = _ordered_ids(conn, page_id)

@@ -15,9 +15,20 @@ from ..config import Settings
 from ..errors import Conflict, NotFound
 from ..services import lines as lines_svc
 from ..services import pages as pages_svc
+from ..services import repair as repair_svc
 from ..worker import queue
 from .deps import get_conn, get_settings
-from .schemas import DocumentCreate, LineCreate, LinePatch, SegmentRequest
+from .schemas import (
+    DocumentCreate,
+    IgnoreRegionRequest,
+    LineCreate,
+    LinePatch,
+    MergeRequest,
+    ReorderRequest,
+    RestoreRequest,
+    SegmentRequest,
+    SplitRequest,
+)
 
 router = APIRouter()
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
@@ -111,7 +122,35 @@ def add_line(page_id: int, body: LineCreate, conn: Conn, settings: Cfg):
     return lines_svc.add_line(conn, settings, page_id, body.model_dump())
 
 
+@router.post("/pages/{page_id}/ignore-region", tags=["repair"])
+def ignore_region(page_id: int, body: IgnoreRegionRequest, conn: Conn, settings: Cfg):
+    """Ignore every active line with at least half of its polygon inside the rectangle or polygon."""
+    return repair_svc.ignore_region(conn, settings, page_id, body.model_dump())
+
+
+@router.post("/pages/{page_id}/reorder", tags=["repair"])
+def reorder_lines(page_id: int, body: ReorderRequest, conn: Conn, settings: Cfg):
+    """Set the full reading order in one transaction."""
+    return repair_svc.reorder(conn, settings, page_id, body.line_ids)
+
+
+@router.post("/pages/{page_id}/restore", tags=["repair"])
+def restore_lines(page_id: int, body: RestoreRequest, conn: Conn, settings: Cfg):
+    """Replace the page's lines with a snapshot (undo); 409 if that would discard typed text and force is false."""
+    return repair_svc.restore(conn, settings, page_id, [ln.model_dump() for ln in body.lines], body.force)
+
+
 # ---- lines -----------------------------------------------------------------------------------------------------
+
+
+@router.post("/lines/merge", tags=["repair"])
+def merge_lines(body: MergeRequest, conn: Conn, settings: Cfg):
+    return repair_svc.merge_lines(conn, settings, body.line_ids)
+
+
+@router.post("/lines/{line_id}/split", tags=["repair"])
+def split_line(line_id: int, body: SplitRequest, conn: Conn, settings: Cfg):
+    return repair_svc.split_line(conn, settings, line_id, body.x, body.y)
 
 
 @router.patch("/lines/{line_id}", tags=["lines"])

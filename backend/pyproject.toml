@@ -12,6 +12,7 @@ dependencies = [
     "pillow",
     "numpy",
     "scipy",
+    "shapely",
     "python-multipart>=0.0.32",
 ]
 

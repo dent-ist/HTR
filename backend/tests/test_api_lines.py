@@ -149,7 +149,6 @@ def test_add_line(client, page):
     "body",
     [
         {},
-        {"baseline": [[1, 1], [2, 2]]},
         {"baseline": [[1, 1]], "polygon": [[1, 1], [5, 1], [5, 5]]},
         {"baseline": [[1, 1], [2, 2]], "polygon": [[1, 1], [5, 1]]},
         {"baseline": [[1, 1], [2, 2]], "polygon": [[1, 1], [5, 1], [99999, 5]]},
