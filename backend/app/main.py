@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .api.abbreviations_api import router as abbreviations_router
+from .api.export_api import router as export_router
 from .api.routes import router
 from .config import APP_VERSION, CORS_ORIGINS, Settings
 from .db import connect, migrate
@@ -86,6 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(router)
     app.include_router(abbreviations_router)
+    app.include_router(export_router)
     return app
 
 

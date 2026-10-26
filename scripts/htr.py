@@ -8,6 +8,11 @@ All output goes under --data (default: <repo>/data, gitignored). Both commands a
 `import` skips files whose content hash is already imported; `segment` skips pages already done and retries
 failed ones, and a failing page never aborts the batch (exit status 1 if any page failed).
 Review sheet: scripts/review_sheet.py.
+
+  htr.py bundle export PATH     write the whole project (scans, PAGE-XML, database, models) to a .htrbundle file
+  htr.py bundle import PATH     restore a bundle into an EMPTY project (stop the server first)
+Bundles contain personal data: they are written only where you point them, nothing is uploaded. Both commands work on
+the --data directory without the server.
 """
 
 from __future__ import annotations
@@ -19,8 +24,56 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "backend"))
 
+from app.config import Settings  # noqa: E402
+from app.errors import ApiError  # noqa: E402
 from app.pipeline.preprocess import DEFAULT_TARGET_LINE_HEIGHT  # noqa: E402
 from app.pipeline.workflow import Workspace, import_folder, segment_pages  # noqa: E402
+
+
+def _bundle(args) -> int:
+    from app.projectlock import try_lock
+    from app.services import bundle
+
+    settings = Settings.for_dir(args.data)
+    try:
+        if args.bundle_cmd == "export":
+            info = bundle.export_to_path(settings, args.path)
+            c = info["counts"]
+            print(
+                f"bundle: {info['path']} ({info['bytes'] / 1e6:.1f} MB): {c['documents']} documents, {c['pages']} pages, "
+                f"{c['lines']} lines, {c['finetuned_models']} fine-tuned models, {c['abbreviations']} abbreviations"
+            )
+            for missing in info["missing_files"]:
+                print(f"warning: {missing} was missing on disk and is not in the bundle", file=sys.stderr)
+            print("The bundle contains personal data. Keep it only where you chose to put it.")
+            return 0
+        if not args.path.is_file():
+            print(f"error: {args.path} is not a file", file=sys.stderr)
+            return 2
+        lock = try_lock(settings.data_dir)
+        if lock is None:
+            print(
+                "error: a server is using this data directory; stop it first (or import from the Export page)",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            with open(args.path, "rb") as f:
+                info = bundle.import_bundle(settings, f)
+        finally:
+            lock.close()
+        c = info["counts"]
+        print(
+            f"imported: {c['documents']} documents, {c['pages']} pages, {c['lines']} lines, "
+            f"{c['finetuned_models']} fine-tuned models, {c['abbreviations']} abbreviations "
+            f"(schema {info['schema_version']}"
+            + (f", migrated from {info['migrated_from']}" if info["migrated_from"] else "")
+            + ")"
+        )
+        return 0
+    except ApiError as e:
+        print(f"error: {e.detail}", file=sys.stderr)
+        return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,7 +94,17 @@ def main(argv: list[str] | None = None) -> int:
     seg.add_argument("--device", default="auto", help="auto (default), cpu or cuda:0")
     seg.add_argument("--force", action="store_true", help="re-segment pages that are already done")
     seg.add_argument("--page", action="append", help="only this page id (repeatable)")
+    bun = sub.add_parser("bundle", help="export or import a whole project as one .htrbundle file")
+    bsub = bun.add_subparsers(dest="bundle_cmd", required=True)
+    bsub.add_parser("export", help="write a bundle (refuses while a job runs or if the file exists)").add_argument(
+        "path", type=Path
+    )
+    bsub.add_parser("import", help="restore a bundle into an empty project (never merges)").add_argument(
+        "path", type=Path
+    )
     args = ap.parse_args(argv)
+    if args.cmd == "bundle":
+        return _bundle(args)
     ws = Workspace(args.data)
 
     if args.cmd == "import":
