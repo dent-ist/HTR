@@ -39,6 +39,11 @@ router = APIRouter()
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 Cfg = Annotated[Settings, Depends(get_settings)]
 
+MISSING_FILE_HINT = (
+    "The file was removed or moved inside the data folder. Restore it from a project bundle, or delete the page and "
+    "import the scan again."
+)
+
 PageStatus = Literal["unsegmented", "segmented", "partially_transcribed", "done"]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 
@@ -101,7 +106,7 @@ def page_working(page_id: int, conn: Conn, settings: Cfg):
 def _file(settings: Settings, rel: str, media_type: str | None = None) -> FileResponse:
     path = settings.data_dir / rel
     if not path.is_file():
-        raise NotFound(f"image file missing on disk: {rel}")
+        raise NotFound(f"image file missing on disk: {rel}", "file_missing", MISSING_FILE_HINT)
     return FileResponse(path, media_type=media_type)
 
 
@@ -115,7 +120,9 @@ def segment_page(page_id: int, conn: Conn, request: Request, body: SegmentReques
     pages_svc.get_page_row(conn, page_id)
     active = queue.find_active(conn, "segment", "page_id", page_id)
     if active:
-        raise Conflict(f"page {page_id} already has a segmentation job ({active['status']}): job {active['id']}")
+        raise Conflict(
+            f"page {page_id} already has a segmentation job ({active['status']}): job {active['id']}", "job_active"
+        )
     guard_resegment(conn, page_id, force)
     job = queue.enqueue(conn, "segment", {"page_id": page_id, "force": force})
     request.app.state.worker.wake()
@@ -177,7 +184,7 @@ def line_crop(line_id: int, conn: Conn, settings: Cfg):
     xs, ys = zip(*json.loads(line["polygon"]), strict=True)
     path = settings.data_dir / page["working_path"]
     if not path.is_file():
-        raise NotFound("working copy missing on disk")
+        raise NotFound("working copy missing on disk", "file_missing", MISSING_FILE_HINT)
     with Image.open(path) as im:
         left, top = max(0, min(xs)), max(0, min(ys))
         right, bottom = min(im.width, max(xs) + 1), min(im.height, max(ys) + 1)
@@ -213,7 +220,7 @@ def cancel_job(job_id: int, conn: Conn):
 def _reject_if_active(conn: sqlite3.Connection, job_type: str) -> None:
     for status in ("queued", "running"):
         for j in queue.list_jobs(conn, status=status, job_type=job_type, limit=1):
-            raise Conflict(f"a {job_type} job is already {j['status']} (job {j['id']})")
+            raise Conflict(f"a {job_type} job is already {j['status']} (job {j['id']})", "job_active")
 
 
 @router.post("/jobs/train", status_code=202, tags=["training"])

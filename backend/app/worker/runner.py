@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 from ..config import Settings
 from ..db import connect
+from ..failures import Failure, classify
+from ..logging_setup import describe_exception, log_event
 from . import queue
 from .handlers import HANDLERS, Handler, JobContext
 
@@ -75,21 +78,52 @@ class Worker:
             if job is None:
                 return False
             handler = self.handlers.get(job["type"])
+            t0 = time.monotonic()
+            ctx = JobContext(job, conn, self.settings)
+            log_event(log, logging.INFO, "job started", job_id=job["id"], job_type=job["type"])
             try:
                 if handler is None:
                     raise NotImplementedError(f"no handler for job type '{job['type']}'")
-                result = handler(JobContext(job, conn, self.settings))
+                result = handler(ctx)
+                if ctx.notices and isinstance(result, dict):
+                    result = {**result, "notices": ctx.notices}
             except queue.JobCancelled as c:
                 if conn.in_transaction:
                     conn.rollback()
-                queue.mark_cancelled(conn, job["id"], c.result)
+                result = c.result
+                if ctx.notices and isinstance(result, dict):
+                    result = {**result, "notices": ctx.notices}
+                queue.mark_cancelled(conn, job["id"], result)
+                status = "cancelled"
             except Exception as e:  # noqa: BLE001  any handler error becomes the job's error message
                 if conn.in_transaction:
                     conn.rollback()
-                log.warning("job %s (%s) failed: %s", job["id"], job["type"], e)
-                queue.fail(conn, job["id"], _describe(e))
+                failure = classify(e, job=True)
+                if isinstance(e, NotImplementedError):
+                    failure = Failure(500, str(e), "job_failed", failure.hint)
+                log_event(
+                    log,
+                    logging.WARNING,
+                    "job failed",
+                    job_id=job["id"],
+                    job_type=job["type"],
+                    code=failure.code,
+                    error=describe_exception(e),
+                )
+                queue.fail(conn, job["id"], failure.message, failure.code, failure.hint)
+                status = "failed"
             else:
                 queue.finish(conn, job["id"], result)
+                status = "succeeded"
+            log_event(
+                log,
+                logging.INFO,
+                "job finished",
+                job_id=job["id"],
+                job_type=job["type"],
+                status=status,
+                seconds=round(time.monotonic() - t0, 2),
+            )
             _release_gpu_memory()  # after the handler's frames (and any exception holding tensors) are gone
             return True
         finally:
@@ -114,8 +148,3 @@ def _release_gpu_memory() -> None:
             torch.cuda.empty_cache()
     except Exception:  # noqa: BLE001
         log.debug("could not release CUDA memory", exc_info=True)
-
-
-def _describe(e: Exception) -> str:
-    msg = str(getattr(e, "detail", None) or e)
-    return msg if isinstance(e, NotImplementedError) or hasattr(e, "detail") else f"{type(e).__name__}: {msg}"

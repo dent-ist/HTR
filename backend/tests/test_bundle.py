@@ -491,9 +491,9 @@ def test_a_failure_during_import_leaves_the_project_as_it_was(golden, fresh, mon
             raise OSError(f"injected failure at {p}")
 
     monkeypatch.setattr(bundle_svc, "_fault", boom)
-    with pytest.raises(OSError, match="injected"):
-        # TestClient re-raises server errors; a real client would get a 500
-        H.import_via_api(client, golden.bundle)
+    r = H.import_via_api(client, golden.bundle)
+    assert r.status_code == 500 and r.json()["code"] == "internal_error"  # a friendly 500, never a stack trace
+    assert "injected" not in r.text
     monkeypatch.undo()
     assert (H.all_files(settings), H.db_dump(settings)) == before
     assert not list(settings.tmp_dir.glob("import-*")) and not list(settings.data_dir.glob(".incoming-*"))
@@ -516,8 +516,8 @@ def test_failure_while_extracting_leaves_nothing_behind(golden, fresh, monkeypat
             raise OSError("disk full")
 
     monkeypatch.setattr(bundle_svc, "_fault", boom)
-    with pytest.raises(OSError, match="disk full"):
-        H.import_via_api(client, golden.bundle)
+    r = H.import_via_api(client, golden.bundle)
+    assert r.status_code == 500 and r.json()["code"] == "internal_error"
     monkeypatch.undo()
     assert (H.all_files(settings), H.db_dump(settings)) == before and not list(settings.tmp_dir.glob("import-*"))
 

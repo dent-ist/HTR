@@ -199,7 +199,9 @@ def check_can_train(conn: sqlite3.Connection) -> list[str]:
     if s["ground_truth_lines"] == 0:
         raise Invalid(
             "there are no usable ground-truth lines to train on: mark transcribed lines as ground truth "
-            "(and not ignored) first"
+            "(and not ignored) first",
+            "no_ground_truth",
+            "Transcribe some lines in the page editor and press Enter to confirm them.",
         )
     return s["warnings"]
 

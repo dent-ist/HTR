@@ -43,14 +43,19 @@ _MODEL = None
 
 
 def resolve_device(device: str = "auto") -> str:
-    if device != "auto":
+    """ "auto" -> cuda:0 when available, else cpu. An explicit CUDA device without CUDA also becomes cpu (the caller
+    reports that as a notice), so a missing GPU never fails a job."""
+    if device == "cpu":
         return device
     try:
         import torch
 
-        return "cuda:0" if torch.cuda.is_available() else "cpu"
+        cuda = torch.cuda.is_available()
     except Exception:  # noqa: BLE001
-        return "cpu"
+        cuda = False
+    if device == "auto":
+        return "cuda:0" if cuda else "cpu"
+    return device if cuda or not device.startswith("cuda") else "cpu"
 
 
 def _load_model():

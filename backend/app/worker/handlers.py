@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from PIL import Image
 
@@ -22,6 +22,7 @@ class JobContext:
     job: dict
     conn: sqlite3.Connection
     settings: Settings
+    notices: list[str] = field(default_factory=list)  # visible, non-fatal remarks (e.g. "running on the CPU")
 
     @property
     def payload(self) -> dict:
@@ -70,6 +71,11 @@ def segment_page(ctx: JobContext) -> dict:
         ctx.progress(0.1)
         seg = segment.segment_image(im, ctx.settings.device)
     ctx.progress(0.8)
+    if seg.device == "cpu" and ctx.settings.device != "cpu":
+        ctx.notices.append(
+            "No usable GPU (CUDA) was found, so segmentation ran on the CPU (slower). "
+            "Run `make check` to see why the GPU is not visible."
+        )
     w, h = page["width"], page["height"]
     lines = [
         Line(id="", baseline=_clamp_points(ln.baseline, w, h), polygon=_clamp_points(ln.polygon, w, h))

@@ -6,7 +6,7 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, NoReturn
 
 from PIL import Image, UnidentifiedImageError
 
@@ -110,7 +110,7 @@ def refresh_status(conn: sqlite3.Connection, page_id: int) -> str:
 def _clean_filename(filename: str | None) -> str:
     name = Path((filename or "").replace("\\", "/")).name.strip()
     if not name or name in (".", ".."):
-        raise Invalid("upload has no file name")
+        raise Invalid("upload has no file name", "no_file_name", "Choose a file again.")
     return name
 
 
@@ -122,23 +122,71 @@ def _receive(stream: BinaryIO, dest: Path, limit: int) -> str:
         while chunk := stream.read(1 << 20):
             size += len(chunk)
             if size > limit:
-                raise TooLarge(f"file exceeds the {limit // (1024 * 1024)} MB upload limit")
+                raise TooLarge(
+                    f"file exceeds the {limit // (1024 * 1024)} MB upload limit",
+                    "upload_too_large",
+                    "Scale the scan down or save it with more compression; 300 DPI is plenty. The limit can be raised "
+                    "with HTR_MAX_UPLOAD_MB.",
+                )
             h.update(chunk)
             out.write(chunk)
     if size == 0:
-        raise Invalid("uploaded file is empty")
+        raise Invalid("uploaded file is empty", "empty_upload", "Choose the scan again; the file has no content.")
     return h.hexdigest()
 
 
-def _check_image(path: Path, suffix: str) -> None:
+def _refuse_unreadable(e: Exception) -> NoReturn:
+    """A decode failure becomes the 415 'not a readable image'; a real I/O error (disk full, permissions) is
+    re-raised as it is so the API reports what actually happened."""
+    if isinstance(e, OSError) and e.errno is not None:
+        raise e
+    raise UnsupportedMedia(
+        "the file is not a readable image; it may be damaged or cut off",
+        "image_unreadable",
+        "Re-scan or re-export the page and try again.",
+    ) from e
+
+
+def _check_image(path: Path, suffix: str, max_pixels: int) -> None:
+    """Refuse files that are not a single, readable, reasonably sized PNG/JPEG/TIFF.
+
+    Multi-page TIFFs (and animated images) are refused rather than importing only their first page, which would
+    silently drop the rest of a scanned document: split them into one image per page first (see the README)."""
+    too_big = TooLarge(
+        f"the image has more than {max_pixels // 1_000_000} megapixels",
+        "image_too_many_pixels",
+        "Scan at 300 DPI (an A4 page is about 8 megapixels) or scale the image down; the limit can be raised with "
+        "HTR_MAX_IMAGE_MP.",
+    )
     try:
         with Image.open(path) as im:
             fmt = im.format
+            width, height = im.size
+            frames = getattr(im, "n_frames", 1)
+            if width * height > max_pixels:
+                raise too_big
             im.verify()
-    except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as e:
-        raise UnsupportedMedia(f"not a readable image: {e}") from e
+    except Image.DecompressionBombError:
+        raise too_big from None
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as e:
+        raise UnsupportedMedia(
+            "the file is not a readable image; it may be damaged or cut off",
+            "image_unreadable",
+            "Re-scan or re-export the page and try again.",
+        ) from e
     if fmt not in ALLOWED[suffix]:
-        raise UnsupportedMedia(f"file extension {suffix} does not match the image content ({fmt})")
+        raise UnsupportedMedia(
+            f"file extension {suffix} does not match the image content ({fmt})",
+            "image_type_mismatch",
+            "Rename the file so its extension matches its format, or export it again as PNG, JPEG or TIFF.",
+        )
+    if frames > 1:
+        raise UnsupportedMedia(
+            f"the file has {frames} pages or frames; only single-page images can be imported",
+            "multipage_image",
+            "Split it into one image per page (for example with `magick convert in.tif page-%03d.png`) and import "
+            "those.",
+        )
 
 
 def import_upload(
@@ -154,7 +202,11 @@ def import_upload(
     name = _clean_filename(filename)
     suffix = Path(name).suffix.lower()
     if suffix not in ALLOWED:
-        raise UnsupportedMedia(f"unsupported file type {suffix or '(none)'}; use PNG, JPEG or TIFF")
+        raise UnsupportedMedia(
+            f"unsupported file type {suffix or '(none)'}; use PNG, JPEG or TIFF",
+            "unsupported_file_type",
+            "Export the scan as PNG, JPEG or TIFF.",
+        )
     settings.tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp = settings.tmp_dir / f"upload_{now_iso().replace(':', '')}_{id(stream):x}{suffix}"
     ws = settings.workspace
@@ -164,13 +216,16 @@ def import_upload(
         existing = conn.execute("SELECT id FROM pages WHERE sha256 = ?", (digest,)).fetchone()
         if existing:
             return get_page(conn, existing["id"]), False
-        _check_image(tmp, suffix)
+        _check_image(tmp, suffix, settings.max_image_pixels)
         try:
             rec = workflow.register_original(tmp, ws, digest, source_name=name)
-        except ValueError as e:
-            raise UnsupportedMedia(f"not a readable image: {e}") from e
+        except (ValueError, OSError) as e:
+            _refuse_unreadable(e)
         created_files.append(ws.root / rec["original"])
-        info = workflow.derive_working(ws, rec, settings.target_line_height, True)
+        try:
+            info = workflow.derive_working(ws, rec, settings.target_line_height, True)
+        except (ValueError, OSError) as e:  # e.g. a JPEG that is cut off passes verify() but fails when decoded
+            _refuse_unreadable(e)
         created_files.append(ws.root / rec["working"])
         try:
             with write_tx(conn):

@@ -148,8 +148,9 @@ def test_event_is_written_in_the_same_transaction_as_the_line_change(client, pro
         raise OSError("disk full")
 
     monkeypatch.setattr(sync, "write_page_xml", boom)
-    with pytest.raises(OSError):
-        client.patch(f"/lines/{a}", json={"text": REF, "is_ground_truth": True})
+    failed = client.patch(f"/lines/{a}", json={"text": REF, "is_ground_truth": True})
+    assert failed.status_code == 500 and failed.json()["code"] == "internal_error"  # a friendly error, no stack trace
+    assert "disk full" not in failed.text and "Traceback" not in failed.text
     monkeypatch.undo()
     assert events(client) == []  # rolled back together with the line
     ln = next(x for x in client.get(f"/pages/{project['open'][0]['page_id']}").json()["lines"] if x["id"] == a)

@@ -14,6 +14,7 @@ import threading
 from .errors import Conflict
 
 BUSY_MESSAGE = "The project is being imported; try again in a moment."
+BUSY_HINT = "Importing a project bundle takes over the app for a short while. Nothing is lost; retry in a few seconds."
 
 
 class Gate:
@@ -65,7 +66,9 @@ class MaintenanceMiddleware:
             await self.app(scope, receive, send)
             return
         if not self.gate.try_enter(exempt=scope.get("path") == "/health"):
-            body = json.dumps({"detail": BUSY_MESSAGE}).encode()
+            body = json.dumps(
+                {"detail": BUSY_MESSAGE, "code": "busy_importing", "message": BUSY_MESSAGE, "hint": BUSY_HINT}
+            ).encode()
             await send(
                 {
                     "type": "http.response.start",

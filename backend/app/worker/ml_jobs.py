@@ -55,7 +55,22 @@ def clean_prediction(text: str) -> str:
 
 
 def _device(ctx: JobContext) -> str:
-    return ctx.payload.get("device") or ctx.settings.device
+    """The device to run on. When a GPU is wanted ("auto" or "cuda...") but CUDA is not available, fall back to the
+    CPU and leave a visible notice on the job (it ends up in `result.notices`)."""
+    device = ctx.payload.get("device") or ctx.settings.device
+    if device == "cpu":
+        return device
+    import torch
+
+    if torch.cuda.is_available():
+        return device
+    note = (
+        "No usable GPU (CUDA) was found, so this job ran on the CPU, which is much slower. "
+        "Run `make check` to see why the GPU is not visible."
+    )
+    if note not in ctx.notices:
+        ctx.notices.append(note)
+    return "cpu"
 
 
 class _Throttle:

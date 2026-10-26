@@ -78,10 +78,16 @@ def resolve_model(conn: sqlite3.Connection, settings: Settings, model_id: int | 
         if row is None:
             raise Invalid(
                 "no recognition model is available: run `make base-model` once to download the pretrained base "
-                "model, or train one"
+                "model, or train one",
+                "no_model",
+                "`make base-model` downloads the pretrained model once (setup step); the app itself never goes online.",
             )
     if not model_file(settings, row).is_file():
-        raise Conflict(f"the file of model {row['id']} is missing on disk ({row['path']})")
+        raise Conflict(
+            f"the file of model {row['id']} is missing on disk ({row['path']})",
+            "model_file_missing",
+            "Restore it from a project bundle, activate another model, or run `make base-model` for the base model.",
+        )
     return row
 
 

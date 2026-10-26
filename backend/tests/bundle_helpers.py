@@ -75,10 +75,12 @@ def file_dump(settings: Settings) -> dict[str, str]:
 
 
 def all_files(settings: Settings) -> dict[str, tuple[int, str]]:
-    """Every file under the data directory except the lock file and the database (compare that with db_dump), for
-    'untouched' checks."""
+    """Every file under the data directory except the lock file, the database (compare that with db_dump) and the
+    log (it records the requests of the test itself), for 'untouched' checks."""
     out = {}
     for p in sorted(settings.data_dir.rglob("*")):
+        if "logs" in p.relative_to(settings.data_dir).parts[:1]:
+            continue
         if p.is_file() and not p.name.endswith(("-wal", "-shm")) and p.name not in (".htr-server.lock", "htr.db"):
             out[p.relative_to(settings.data_dir).as_posix()] = (p.stat().st_size, sha(p))
     return out
