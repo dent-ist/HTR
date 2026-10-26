@@ -95,6 +95,16 @@ save never discards text, it shows an error with Retry, and leaving the page wit
 | Tab / Shift+Tab | Next / previous line (all lines, no saving; typed text is kept per line) |
 | Esc | Revert unsaved edits on the current line (closes the help first if it is open) |
 | Ctrl+I | Ignore / un-ignore the current line |
+| Alt+M (or M outside the text box) | Merge mode: click lines to add/remove them (the current line is pre-picked), Enter merges, Esc cancels |
+| Alt+J (or J) | Merge the current line with the next one immediately |
+| Alt+S (or S) | Split mode: click a point on a line to preview the cut, click it again or press Enter to cut |
+| Alt+B (or B) | Draw baseline for a missed line: click 2+ points, Backspace removes the last, Enter creates the line |
+| Alt+Shift+B (or Shift+B) | Redraw the baseline of the selected line (the server rebuilds its polygon) |
+| Alt+R (or R) | Ignore region: drag a rectangle; every line at least half inside it is ignored |
+| Alt+Delete / Alt+Backspace (or Delete) | Delete the current line |
+| Alt+Up / Alt+Down | Move the current line up / down in reading order |
+| Ctrl+Z (Alt+Z always) | Undo the last repair, multi-level (while the text box has unsaved edits Ctrl+Z is the normal text undo) |
+| Esc in a mode | Cancel the mode and return to Select |
 | Alt+PageDown / Alt+PageUp | Next / previous page of the document |
 | Alt+0 | Fit page to width |
 | Ctrl+/ or F1 (or `?` when focus is not in the text box) | Shortcut help overlay |
@@ -102,10 +112,23 @@ save never discards text, it shows an error with Retry, and leaving the page wit
 In the text box Tab and Enter belong to the transcription flow; toolbar buttons stay reachable with the mouse or by
 clicking out of the box (buttons keep their normal Tab/Enter behaviour once focused).
 
+**Segmentation repair** (part B of M3). The toolbar above the canvas has a button for every tool and a banner that
+names the active mode; the canvas gets a pink frame and a crosshair, and pending geometry is drawn as a ghost (picked
+lines in purple, the cut with its two halves, the baseline being drawn, the region rectangle with the lines it would
+ignore). While a mode is active the keyboard focus moves off the text box so Enter, Esc and Backspace belong to the
+mode. Merge or split of a transcribed line asks first (merge resets ground truth because the combined text is
+unverified; split clears both halves and offers the old text to paste into either half). A new line from a drawn
+baseline is placed in top-to-bottom reading order. Every operation can be undone with Ctrl+Z (up to 50 levels): the
+editor remembers the page's lines before each operation and restores them through `POST /pages/{id}/restore`. That
+endpoint refuses, and the UI asks you to confirm, if the undo would drop text you typed after the operation, so an
+undo never silently loses transcription work. Errors are shown in a banner and leave the page as it was.
+
 **Tests**: `make test-frontend` (API client, the pure transcription reducer and key mapping, zoom/pan/hit-test
 maths, component tests for the keyboard flow and library). `make test-e2e` generates a synthetic page, uploads it,
 segments it with real Kraken, transcribes three lines with the keyboard, reloads and checks the saved text and
-ground-truth flags through the API, with no console errors. Screenshots land in `frontend/test-results/screenshots`.
+ground-truth flags through the API, with no console errors. Two more e2e tests cover repair (split, merge, delete,
+draw baseline, ignore region, undo, reload) and browser behaviour (wheel zoom at the cursor, drag pan, click-to-select,
+Alt+0, Ctrl+I, Esc revert, a PATCH forced to fail that must keep the typed text and succeed on Retry). Screenshots land in `frontend/test-results/screenshots`.
 It uses API port 8100 and web port 5173 and a temporary data dir, never `data/`.
 
 ## Inspecting a folder of scans
