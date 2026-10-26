@@ -268,6 +268,7 @@ progress {
   display: flex;
 }
 .canvas-wrap {
+  user-select: none;
   position: relative;
   flex: 1;
   min-width: 0;
@@ -474,6 +475,7 @@ kbd {
   margin: 0 0.3rem;
 }
 .mode-banner {
+  min-height: 2.1rem; /* same height with and without the Cancel button, so the canvas does not jump */
   display: flex;
   gap: 0.7rem;
   align-items: center;
