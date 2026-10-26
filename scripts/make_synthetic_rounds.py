@@ -184,17 +184,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"   ordering: {json.dumps(order_stats)}")
     (args.out / "rounds.json").write_text(json.dumps(results, indent=1))
 
-    print(
-        "\nround | GT lines | held-out CER (n) | WER  | fixed-pool CER | reviewed | accepted | edits/line | edits/char | errors in first 20: by confidence vs random"
-    )
+    print("\nround | GT lines | held-out CER (n) | held-out WER | fixed-pool CER / WER")
+    for x in results:
+        print(
+            f"{x['round']:>5} | {x['ground_truth_lines_at_training']:>8} | {x['heldout_cer']:.3f} ({x['held_out_lines']}) "
+            f"| {x['heldout_wer']:.3f} | {x['fixed_pool_cer']:.3f} / {x['fixed_pool_wer']:.3f}"
+        )
+    print("\nround | accepted unchanged | edits/line | edits/char | errors in first 20: confidence vs random")
     for x in results:
         o = x["ordering"]
+        rand = o["errors_in_first_k_random_mean"]
         print(
-            f"{x['round']:>5} | {x['ground_truth_lines_at_training']:>8} | {x['heldout_cer']:.3f} ({x['held_out_lines']:>2})"
-            f"     | {x['heldout_wer']:.3f} | {x['fixed_pool_cer']:.3f}          | {x['reviewed']:>8} | {x['accepted_rate']:.0%}      "
-            f"| {x['mean_edits_per_reviewed_line']:.2f}       | {x['mean_edits_per_char']:.3f}      "
-            f"| {o['errors_in_first_k_by_confidence']}/{o['first_k']} vs {o['errors_in_first_k_random_mean']:.1f}/{o['first_k']}"
-            f" (queue error rate {o['queue_error_rate']:.0%})"
+            f"{x['round']:>5} | {x['accepted_rate']:.0%} ({x['accepted_unchanged']}/{x['reviewed']}) "
+            f"| {x['mean_edits_per_reviewed_line']:.2f} | {x['mean_edits_per_char']:.3f} "
+            f"| {o['errors_in_first_k_by_confidence']}/{o['first_k']} vs {rand:.1f}/{o['first_k']} "
+            f"(queue error rate {o['queue_error_rate']:.0%})"
         )
     return 0
 
