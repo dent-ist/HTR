@@ -930,3 +930,14 @@ mark.ambiguous {
   opacity: 0.5;
   cursor: not-allowed;
 }
+span.button {
+  font: inherit;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  display: inline-block;
+}
+.abbr-tools input[type="search"] {
+  min-width: 18rem;
+}
