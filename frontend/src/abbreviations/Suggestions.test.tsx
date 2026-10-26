@@ -129,8 +129,12 @@ describe("Suggestions panel", () => {
   it("can cancel a running job", async () => {
     const { api } = setup({ enabled: true, backend: ON, items: [] });
     vi.spyOn(api, "generateSuggestions").mockResolvedValue(job({ status: "running" }));
-    vi.spyOn(api, "getJob").mockResolvedValue(job({ status: "running", cancel_requested: true }));
-    const cancel = vi.spyOn(api, "cancelJob").mockResolvedValue(job({ status: "running", cancel_requested: true }));
+    let cancelRequested = false; // the server reports the request from the moment it was made
+    vi.spyOn(api, "getJob").mockImplementation(async () => job({ status: "running", cancel_requested: cancelRequested }));
+    const cancel = vi.spyOn(api, "cancelJob").mockImplementation(async () => {
+      cancelRequested = true;
+      return job({ status: "running", cancel_requested: true });
+    });
     await userEvent.click(await screen.findByRole("button", { name: "Suggest abbreviations" }));
     await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(cancel).toHaveBeenCalledWith(5);
