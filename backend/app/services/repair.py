@@ -13,7 +13,7 @@ from typing import Any
 from ..config import Settings
 from ..errors import Conflict, Invalid, NotFound
 from ..pipeline.segment import Line
-from . import geometry, sync
+from . import geometry, review, sync
 from . import lines as lines_svc
 from . import pages as pages_svc
 from .rows import json_dumps_points, json_loads
@@ -92,7 +92,9 @@ def merge_lines(conn: sqlite3.Connection, settings: Settings, line_ids: list[int
 def split_line(conn: sqlite3.Connection, settings: Settings, line_id: int, x: float, y: float) -> dict:
     """Cut a line at x. The left half keeps the id; the right half is new and follows it in reading order.
 
-    Text is cleared on both halves (the old text is returned as `old_text`); ground truth is reset.
+    Text is cleared on both halves (the old text is returned as `old_text`); ground truth is reset. A prediction on the
+    line is dropped with its text (`predicted_by_model_id` / `predicted_text` are cleared: the halves are new lines
+    nobody predicted, and no review event is written). Undo (restore) gives all of it back.
     """
     cur = lines_svc.get_line_row(conn, line_id)
     page_id = cur["page_id"]
@@ -107,7 +109,7 @@ def split_line(conn: sqlite3.Connection, settings: Settings, line_id: int, x: fl
             raise NotFound(f"line {line_id} not found")
         conn.execute(
             "UPDATE lines SET baseline = ?, polygon = ?, text = '', text_source = NULL, confidence = NULL, "
-            "is_ground_truth = 0 WHERE id = ?",
+            "is_ground_truth = 0, predicted_by_model_id = NULL, predicted_text = NULL WHERE id = ?",
             (json_dumps_points(lb), json_dumps_points(lp), line_id),
         )
         ids = lines_svc._ordered_ids(conn, page_id)
@@ -129,7 +131,8 @@ def split_line(conn: sqlite3.Connection, settings: Settings, line_id: int, x: fl
 
 
 def ignore_region(conn: sqlite3.Connection, settings: Settings, page_id: int, body: dict[str, Any]) -> dict:
-    """Mark every active line with >= 50% of its polygon area inside the region as ignored."""
+    """Mark every active line with >= 50% of its polygon area inside the region as ignored. For each predicted line
+    this writes an `ignored` review event (same transaction), like ignoring the line through PATCH."""
     size = _page_size(conn, page_id)
     if body.get("polygon") is not None:
         region = geometry.region_from_points(lines_svc.check_points(body["polygon"], "region", 3, size))
@@ -141,9 +144,11 @@ def ignore_region(conn: sqlite3.Connection, settings: Settings, page_id: int, bo
         raise Invalid("region is empty")
     affected: list[int] = []
     with sync.page_transaction(conn, settings, page_id):
-        for r in conn.execute("SELECT id, polygon FROM lines WHERE page_id = ? AND ignored = 0", (page_id,)).fetchall():
+        for r in conn.execute("SELECT * FROM lines WHERE page_id = ? AND ignored = 0", (page_id,)).fetchall():
             if geometry.region_overlap_share(_pts(json_loads(r["polygon"])), region) >= IGNORE_OVERLAP:
                 affected.append(r["id"])
+                # Ignoring a predicted line is a review decision, exactly as if it had been ignored one by one.
+                review.record_if_reviewed(conn, r, None, None, 1)
         conn.executemany("UPDATE lines SET ignored = 1 WHERE id = ?", [(i,) for i in affected])
     return {"affected": affected, "page": page_detail(conn, page_id)}
 
@@ -166,6 +171,12 @@ def reorder(conn: sqlite3.Connection, settings: Settings, page_id: int, line_ids
 
 def restore(conn: sqlite3.Connection, settings: Settings, page_id: int, snapshot: list[dict], force: bool) -> dict:
     """Replace the page's lines with `snapshot` (in that order), keeping ids where possible.
+
+    Prediction state is given back exactly: each snapshot line's `predicted_by_model_id` and `predicted_text` are
+    restored (also on lines that are re-created because the operation deleted them), and an `ignored` review event that
+    retired the same prediction is withdrawn. Merge and split themselves do not carry predictions over (a merged or
+    split line is a new, unpredicted line with its text rules as documented), so undoing them is what brings the
+    prediction back.
 
     Safety: unless force=true this refuses (409) if the page currently holds non-empty text that the snapshot would
     not give back (compared word by word: the words of every current line must be found in the snapshot's texts), so
@@ -203,38 +214,60 @@ def restore(conn: sqlite3.Connection, settings: Settings, page_id: int, snapshot
         keep = {s["id"] for s in clean if s.get("id") in mine}
         for lid in mine - keep:
             conn.execute("DELETE FROM lines WHERE id = ?", (lid,))
+        known_models = {r[0] for r in conn.execute("SELECT id FROM models")}
         ids: list[int] = []
         for s in clean:
             sid = s.get("id")
+            model_id = s.get("predicted_by_model_id")
+            if model_id not in known_models:
+                model_id = None  # a model that no longer exists cannot be given back
+            predicted_text = None
+            if model_id:
+                given = s.get("predicted_text")
+                predicted_text = given if given is not None else s["text"]
             values = (
                 json_dumps_points(s["baseline"]),
                 json_dumps_points(s["polygon"]),
                 s["text"],
                 s["text_source"] if s["text"] else None,
                 s["confidence"],
+                model_id,
+                predicted_text,
                 int(s["is_ground_truth"]),
                 int(s["ignored"]),
             )
             if sid in keep:
                 conn.execute(
-                    "UPDATE lines SET baseline=?, polygon=?, text=?, text_source=?, confidence=?, is_ground_truth=?, "
-                    "ignored=? WHERE id=?",
+                    "UPDATE lines SET baseline=?, polygon=?, text=?, text_source=?, confidence=?, "
+                    "predicted_by_model_id=?, predicted_text=?, is_ground_truth=?, ignored=? WHERE id=?",
                     (*values, sid),
                 )
                 ids.append(sid)
             else:
                 taken = sid is not None and conn.execute("SELECT 1 FROM lines WHERE id = ?", (sid,)).fetchone()
-                cols = 'page_id, "index", baseline, polygon, text, text_source, confidence, is_ground_truth, ignored'
+                cols = (
+                    'page_id, "index", baseline, polygon, text, text_source, confidence, predicted_by_model_id, '
+                    "predicted_text, is_ground_truth, ignored"
+                )
                 if sid is not None and not taken:
                     cur = conn.execute(
-                        f"INSERT INTO lines (id, {cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        f"INSERT INTO lines (id, {cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (sid, page_id, len(ids), *values),
                     )
                 else:
                     cur = conn.execute(
-                        f"INSERT INTO lines ({cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (page_id, len(ids), *values)
+                        f"INSERT INTO lines ({cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (page_id, len(ids), *values),
                     )
                 ids.append(int(cur.lastrowid))
+            if model_id:
+                # The prediction is back in force, so the 'ignored' review decision that retired it (an
+                # ignore-region that is being undone) is withdrawn: one prediction yields at most one event.
+                conn.execute(
+                    "DELETE FROM review_events WHERE line_id = ? AND model_id = ? AND predicted_text = ? "
+                    "AND action = 'ignored'",
+                    (ids[-1], model_id, predicted_text),
+                )
         # indices of kept rows may collide transiently; renumber in two passes is unnecessary (no UNIQUE), just set
         lines_svc._renumber(conn, ids)
     return page_detail(conn, page_id)

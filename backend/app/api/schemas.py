@@ -125,6 +125,10 @@ class RestoreLine(BaseModel):
     text: str = ""
     text_source: Literal["manual", "predicted"] | None = None
     confidence: float | None = None
+    # Which model predicted this line and what it predicted (the snapshot review effort is measured against); both are
+    # given back exactly as the line had them before the operation that is being undone.
+    predicted_by_model_id: int | None = None
+    predicted_text: str | None = None
     is_ground_truth: bool = False
     ignored: bool = False
 
@@ -132,6 +136,11 @@ class RestoreLine(BaseModel):
     @classmethod
     def _text(cls, v: str) -> str:
         return _check_text(v)
+
+    @field_validator("predicted_text")
+    @classmethod
+    def _predicted(cls, v: str | None) -> str | None:
+        return None if v is None else _check_text(v)
 
 
 class RestoreRequest(BaseModel):
