@@ -40,8 +40,9 @@ def _bundle(args) -> int:
             info = bundle.export_to_path(settings, args.path)
             c = info["counts"]
             print(
-                f"bundle: {info['path']} ({info['bytes'] / 1e6:.1f} MB): {c['documents']} documents, {c['pages']} pages, "
-                f"{c['lines']} lines, {c['finetuned_models']} fine-tuned models, {c['abbreviations']} abbreviations"
+                f"bundle: {info['path']} ({info['bytes'] / 1e6:.1f} MB): {c['documents']} documents, "
+                f"{c['pages']} pages, {c['lines']} lines, {c['finetuned_models']} fine-tuned models, "
+                f"{c['abbreviations']} abbreviations"
             )
             for missing in info["missing_files"]:
                 print(f"warning: {missing} was missing on disk and is not in the bundle", file=sys.stderr)
