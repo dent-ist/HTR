@@ -1,0 +1,449 @@
+/* Plain CSS, system fonts only: the built app makes no outbound requests. */
+:root {
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --text: #1d2330;
+  --muted: #5d6677;
+  --border: #cfd4dc;
+  --accent: #2f6fdb;
+  --accent-text: #ffffff;
+  --ok: #1c7a3c;
+  --warn: #8a5a00;
+  --err: #b3261e;
+  --sel: #f08a00;
+  --focus: #0b57d0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--bg);
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+button,
+a.button {
+  font: inherit;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+button:hover:not(:disabled),
+a.button:hover {
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+input[type="text"],
+input:not([type]) {
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+}
+
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 0.85em;
+}
+.spacer {
+  flex: 1;
+}
+.error {
+  color: var(--err);
+}
+.banner {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0.4rem 0;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--err);
+  border-radius: 6px;
+  background: #fdecea;
+}
+.banner span {
+  flex: 1;
+}
+
+/* ---------------- library ---------------- */
+.library {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1rem 16px 3rem;
+}
+.library-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.library-head h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+.new-doc {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+.new-doc label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  color: var(--muted);
+  gap: 0.2rem;
+}
+.doc {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.8rem 1rem 1rem;
+  margin-top: 1.2rem;
+}
+.doc h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1.15rem;
+}
+.dropzone {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0.8rem 1rem;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.dropzone.over {
+  border-color: var(--accent);
+  background: #eaf1fd;
+}
+.uploads {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  font-size: 0.9rem;
+}
+.uploads li {
+  padding: 0.25rem 0.5rem;
+  border-left: 4px solid var(--border);
+  margin-bottom: 0.25rem;
+}
+.uploads li.ok {
+  border-color: var(--ok);
+}
+.uploads li.duplicate {
+  border-color: #d9a400;
+  background: #fff7dd;
+  color: var(--warn);
+}
+.uploads li.error {
+  border-color: var(--err);
+  color: var(--err);
+}
+table.pages {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.8rem;
+}
+.pages th,
+.pages td {
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.pages th {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.status {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.status.segmented {
+  background: #e8f0fd;
+  border-color: #aac4f2;
+}
+.status.partially_transcribed {
+  background: #fff3d6;
+  border-color: #e8c35f;
+}
+.status.done {
+  background: #def3e5;
+  border-color: #8fcaa3;
+}
+.progress-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+progress {
+  width: 150px;
+  height: 10px;
+}
+.actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.job {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* ---------------- editor ---------------- */
+.editor {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.8rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.editor-bar h1 {
+  font-size: 1rem;
+  margin: 0;
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.save-state {
+  font-size: 0.85rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #def3e5;
+  color: var(--ok);
+}
+.save-state.pending {
+  background: #fff3d6;
+  color: var(--warn);
+}
+.editor-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.page-canvas {
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+.page-canvas:active {
+  cursor: grabbing;
+}
+.canvas-note {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  background: var(--panel);
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+}
+.line-list {
+  width: 230px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+.line-list ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.line-list button {
+  display: flex;
+  width: 100%;
+  gap: 0.4rem;
+  align-items: baseline;
+  border: 0;
+  border-bottom: 1px solid #e6e9ee;
+  border-radius: 0;
+  text-align: left;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+}
+.line-list button.sel {
+  background: #fff0d6;
+  box-shadow: inset 4px 0 0 var(--sel);
+}
+.line-list button.gt .n {
+  color: var(--ok);
+  font-weight: 700;
+}
+.line-list button.ign {
+  color: var(--muted);
+  font-style: italic;
+}
+.line-list button.err {
+  background: #fdecea;
+}
+.line-list .n {
+  min-width: 1.6rem;
+  color: var(--muted);
+}
+.line-list .t {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.line-list .flag {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.dock {
+  background: var(--panel);
+  border-top: 2px solid var(--border);
+  padding: 0.5rem 0.8rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.badge {
+  font-size: 0.75rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.badge.gt {
+  background: #def3e5;
+  border-color: #8fcaa3;
+  color: var(--ok);
+}
+.badge.ign {
+  background: #eee;
+  color: var(--muted);
+}
+.crop-box {
+  max-height: 150px;
+  overflow: auto;
+  background: #e9ebef;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-align: center;
+  padding: 4px;
+}
+.crop-box img {
+  max-width: 100%;
+  max-height: 140px;
+  object-fit: contain;
+  display: inline-block;
+  vertical-align: middle;
+}
+.line-input {
+  width: 100%;
+  font-size: 1.15rem;
+}
+.hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.notice {
+  margin: 0;
+  color: var(--warn);
+}
+.editor-state {
+  padding: 2rem;
+}
+
+/* ---------------- help overlay ---------------- */
+.overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 33, 0.55);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+.overlay {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 1rem 1.4rem 1.2rem;
+  max-width: 640px;
+  width: calc(100% - 32px);
+}
+.overlay h2 {
+  margin-top: 0;
+}
+.overlay table {
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+.overlay th {
+  text-align: left;
+  padding: 0.25rem 0.8rem 0.25rem 0;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.overlay td {
+  padding: 0.25rem 0;
+}
+kbd {
+  font: 0.85rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #eef0f4;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+}
+
+@media (max-width: 760px) {
+  .line-list {
+    display: none;
+  }
+}
