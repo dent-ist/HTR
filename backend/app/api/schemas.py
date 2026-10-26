@@ -164,3 +164,42 @@ class PredictRequest(BaseModel):
     page_ids: list[int] | None = Field(default=None, max_length=5000, description="limit to these pages")
     batch_size: int | None = Field(default=None, ge=1, le=256)
     device: Literal["auto", "cpu", "cuda:0"] | None = None
+
+
+# ---- M6: abbreviations ------------------------------------------------------------------------------------------
+
+
+class AbbreviationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    written: str = Field(min_length=1, max_length=200)
+    expansion: str = Field(min_length=1, max_length=2000)
+    notes: str | None = Field(default=None, max_length=2000)
+    case_sensitive: bool = False
+
+
+class AbbreviationPatch(BaseModel):
+    """Partial update; `notes: null` clears the notes, the other fields must not be null."""
+
+    model_config = ConfigDict(extra="forbid")
+    written: str | None = Field(default=None, max_length=200)
+    expansion: str | None = Field(default=None, max_length=2000)
+    notes: str | None = Field(default=None, max_length=2000)
+    case_sensitive: bool | None = None
+
+    @model_validator(mode="after")
+    def _no_nulls(self):
+        for name in self.model_fields_set - {"notes"}:
+            if getattr(self, name) is None:
+                raise ValueError(f"{name} must not be null")
+        if not self.model_fields_set:
+            raise ValueError("nothing to change")
+        return self
+
+    def changes(self) -> dict:
+        return {k: getattr(self, k) for k in self.model_fields_set}
+
+
+class ExpandRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(max_length=20000)
+    ambiguous: Literal["raw", "mark"] = "raw"

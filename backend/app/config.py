@@ -9,6 +9,7 @@ from pathlib import Path
 from .pipeline.preprocess import DEFAULT_TARGET_LINE_HEIGHT
 from .pipeline.workflow import Workspace
 
+APP_VERSION = "0.3.0"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Vite dev server origins only (plan section 4: nothing else may call the API from a browser).

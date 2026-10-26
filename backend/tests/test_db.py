@@ -25,13 +25,14 @@ def columns(conn, table):
 
 
 def test_migrate_creates_schema_and_records_version(conn):
-    assert migrate(conn) == LATEST_VERSION == 3
+    assert migrate(conn) == LATEST_VERSION == 4
     assert EXPECTED_TABLES <= tables(conn)
     rows = conn.execute("SELECT version, name FROM schema_version ORDER BY version").fetchall()
     assert [(r["version"], r["name"]) for r in rows] == [
         (1, "initial schema"),
         (2, "models registry and splits"),
         (3, "review events"),
+        (4, "abbreviation dictionary"),
     ]
 
 

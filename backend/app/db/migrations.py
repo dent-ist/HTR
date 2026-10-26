@@ -175,10 +175,23 @@ CREATE TABLE review_events (
 CREATE INDEX idx_review_events_model ON review_events(model_id);
 """
 
+_V4 = """
+-- M6: abbreviation dictionary. Several rows may share a written form (that is an ambiguous abbreviation), but a
+-- (written, expansion) pair is unique. case_sensitive: match the written form exactly instead of ignoring case.
+-- `count` caches the number of occurrences in non-ignored line texts; the API refreshes it on listing.
+ALTER TABLE abbreviations ADD COLUMN case_sensitive INTEGER NOT NULL DEFAULT 0 CHECK (case_sensitive IN (0, 1));
+ALTER TABLE abbreviations ADD COLUMN created_at TEXT;
+ALTER TABLE abbreviations ADD COLUMN updated_at TEXT;
+DELETE FROM abbreviations WHERE id NOT IN (SELECT MIN(id) FROM abbreviations GROUP BY written, expansion);
+CREATE UNIQUE INDEX idx_abbreviations_pair ON abbreviations(written, expansion);
+CREATE INDEX idx_abbreviations_written ON abbreviations(written);
+"""
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "initial schema", _V1),
     Migration(2, "models registry and splits", _V2),
     Migration(3, "review events", _V3),
+    Migration(4, "abbreviation dictionary", _V4),
 ]
 LATEST_VERSION = MIGRATIONS[-1].version
 

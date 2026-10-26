@@ -11,10 +11,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .api.abbreviations_api import router as abbreviations_router
 from .api.routes import router
-from .config import CORS_ORIGINS, Settings
+from .config import APP_VERSION, CORS_ORIGINS, Settings
 from .db import connect, migrate
 from .errors import ApiError
+from .maintenance import Gate, MaintenanceMiddleware
+from .projectlock import try_lock
 from .services import models as models_svc
 from .worker import queue
 from .worker.runner import Worker
@@ -32,6 +35,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
+        app.state.lock = try_lock(settings.data_dir)  # keeps `scripts/htr.py bundle import` out while we run
+        if app.state.lock is None:
+            log.warning("another process already holds the lock on %s (is a second server running?)", settings.data_dir)
         conn = connect(settings.db_path)
         try:
             migrate(conn)
@@ -49,9 +55,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             if not worker.stop():
                 log.warning("worker still busy at shutdown; its job will be marked failed on next start")
+            if app.state.lock is not None:
+                app.state.lock.close()
 
-    app = FastAPI(title="HTR", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="HTR", version=APP_VERSION, lifespan=lifespan)
     app.state.settings = settings
+    app.state.gate = Gate()
+    app.add_middleware(MaintenanceMiddleware, gate=app.state.gate)  # added first = inside CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
@@ -75,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(router)
+    app.include_router(abbreviations_router)
     return app
 
 
