@@ -12,6 +12,7 @@ dependencies = [
     "pillow",
     "numpy",
     "scipy",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]
