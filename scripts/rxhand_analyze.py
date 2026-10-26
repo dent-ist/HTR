@@ -2,7 +2,7 @@
 """Tables and error analysis from the result files written by `scripts/rxhand_experiment.py` (dev tool).
 
     curve    --project DIR [--prefix curve_]   learning-curve table (A and B, with bootstrap CIs), baselines
-    analyze  --project DIR --run NAME          confidence vs error, active-learning premise, error analysis, contact sheet
+    analyze  --project DIR --run NAME          confidence vs error, review order, error analysis, contact sheet
 
 Everything is computed from the saved predictions, so it needs no GPU. Output images go to
 <project>/experiment/out/ (inside the gitignored data directory); they contain dataset images, never commit them.
@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -21,7 +21,7 @@ sys.path.insert(0, str(REPO / "backend"))
 
 import numpy as np  # noqa: E402
 
-from app.pipeline.evaluate import bootstrap_cer_ci, edit_distance, evaluate, exact_match  # noqa: E402
+from app.pipeline.evaluate import edit_distance, evaluate, exact_match  # noqa: E402
 
 
 def load(project: Path, name: str) -> dict:
@@ -37,9 +37,7 @@ def fmt_ci(ci) -> str:
 
 
 def row_for(part: dict) -> str:
-    return (
-        f"{part['cer']:.3f} [{fmt_ci(part['cer_ci95'])}] | {part['wer']:.3f} | {part['exact']:.3f}"
-    )
+    return f"{part['cer']:.3f} [{fmt_ci(part['cer_ci95'])}] | {part['wer']:.3f} | {part['exact']:.3f}"
 
 
 def cmd_curve(a) -> int:
@@ -159,7 +157,7 @@ def cmd_analyze(a) -> int:
               f"mean conf right {conf[~wrong].mean():.3f} wrong {conf[wrong].mean():.3f}")  # fmt: skip
         for frac in (0.1, 0.2, 0.3):
             rs = review_stats(rows, frac)
-            print(f"  lowest {frac:.0%} by confidence: holds {rs['share_wrong_in_lowest']:.1%} of the wrong predictions "
+            print(f"  lowest {frac:.0%} by confidence: holds {rs['share_wrong_in_lowest']:.1%} of wrong predictions "
                   f"(random order: {rs['share_wrong_in_random']:.1%}), {rs['share_edits_in_lowest']:.1%} of all edits; "
                   f"CER {rs['cer_before']:.3f} -> {rs['cer_after_fixing_lowest']:.3f} after correcting them "
                   f"(random: {rs['cer_after_fixing_random']:.3f})")  # fmt: skip
