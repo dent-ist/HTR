@@ -58,7 +58,8 @@ def cmd_curve(a) -> int:
     nA = runs[0]["sets"]["seen"]["n"] if runs else 0
     nB = runs[0]["sets"]["unseen"]["n"] if runs else 0
     print(f"| N train | epochs (best) | train s | peak VRAM MB | A seen words (n={nA}): CER [95% CI] | WER | exact "
-          f"| B unseen words (n={nB}): CER [95% CI] | WER | exact | B CER without its top label | A labels in subset |")  # fmt: skip
+          f"| B unseen words (n={nB}): CER [95% CI] | WER | exact | B CER without its top label "
+          "| A labels in subset |")  # fmt: skip
     print("|---|---|---|---|---|---|---|---|---|---|---|---|")
     meta = json.loads((proj / "experiment" / "meta.json").read_text())
     ent = {e["line_id"]: e for e in meta["entries"]}
