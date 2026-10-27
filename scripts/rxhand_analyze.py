@@ -58,13 +58,19 @@ def cmd_curve(a) -> int:
     nA = runs[0]["sets"]["seen"]["n"] if runs else 0
     nB = runs[0]["sets"]["unseen"]["n"] if runs else 0
     print(f"| N train | epochs (best) | train s | peak VRAM MB | A seen words (n={nA}): CER [95% CI] | WER | exact "
-          f"| B unseen words (n={nB}): CER [95% CI] | WER | exact | A labels in subset |")  # fmt: skip
-    print("|---|---|---|---|---|---|---|---|---|---|---|")
+          f"| B unseen words (n={nB}): CER [95% CI] | WER | exact | B CER without its top label | A labels in subset |")  # fmt: skip
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+    meta = json.loads((proj / "experiment" / "meta.json").read_text())
+    ent = {e["line_id"]: e for e in meta["entries"]}
     for r in runs:
         s = r["sets"]
         vram = f"{r['peak_vram_mb']:.0f}" if r.get("peak_vram_mb") else "-"
-        print(f"| {r['n_train']} | {r['epochs_run']} ({r['best_epoch']}) | {r['train_seconds']:.0f} | {vram} | "
-              f"{row_for(s['seen'])} | {row_for(s['unseen'])} | {r['seen_coverage_in_subset']:.0%} |")  # fmt: skip
+        keys = Counter(ent[p["id"]]["key"] for p in s["unseen"]["predictions"])
+        top = keys.most_common(1)[0][0]
+        rest = [(p["truth"], p["pred"]) for p in s["unseen"]["predictions"] if ent[p["id"]]["key"] != top]
+        print(f"| {r['n_train']} | {r['epochs_run']} | {r['train_seconds']:.0f} | {vram} | "
+              f"{row_for(s['seen'])} | {row_for(s['unseen'])} | {evaluate(rest).cer:.3f} | "
+              f"{r['seen_coverage_in_subset']:.0%} |")  # fmt: skip
     return 0
 
 

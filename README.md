@@ -5,7 +5,8 @@ your hand, and it predicts the rest. **Nothing leaves your machine**: the server
 outbound connections (tested), and keeps scans, transcriptions and models in a `data/` folder that git ignores.
 
 Full spec and decisions: [docs/implementation-plan.md](docs/implementation-plan.md). HTTP API:
-[docs/api.md](docs/api.md).
+[docs/api.md](docs/api.md). First measurement of the recognizer on real (word-level) handwriting:
+[docs/experiments/rxhand.md](docs/experiments/rxhand.md).
 
 ## Quick start
 
