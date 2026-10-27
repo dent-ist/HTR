@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -188,6 +188,19 @@ def cmd_analyze(a) -> int:
               + " | top insertions: " + ", ".join(f"{y} {c}" for y, c in ins.most_common(8)))  # fmt: skip
         ci_pairs = [(r["truth"].lower(), r["pred"].lower()) for r in rows]
         print(f"  case-insensitive CER {evaluate(ci_pairs).cer:.3f} (case-sensitive {part['cer']:.3f})")
+        per_label: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        for r in rows:
+            per_label[ent[r["id"]]["key"]].append((r["truth"], r["pred"]))
+        contrib = sorted(per_label.items(), key=lambda kv: -sum(edit_distance(t, h) for t, h in kv[1]))
+        total_edits = sum(edit_distance(t, h) for _, v in contrib for t, h in v)
+        print("  labels contributing most edits (share of all edits, samples, own CER): " + "; ".join(
+            f"'{k}' {sum(edit_distance(t, h) for t, h in v) / total_edits:.1%} n={len(v)} CER {evaluate(v).cer:.2f}"
+            for k, v in contrib[:5]))  # fmt: skip
+        top_key = max(per_label, key=lambda k: len(per_label[k]))
+        rest = [(r["truth"], r["pred"]) for r in rows if ent[r["id"]]["key"] != top_key]
+        n_top = len(per_label[top_key])
+        print(f"  most frequent label '{top_key}': {n_top} samples ({n_top / len(rows):.0%}); "
+              f"CER without it {evaluate(rest).cer:.3f}")  # fmt: skip
         groups = {
             "length 1-4": lambda r, e: len(r["truth"]) <= 4,
             "length 5-7": lambda r, e: 5 <= len(r["truth"]) <= 7,
